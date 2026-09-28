@@ -165,6 +165,39 @@ final class LibraryStore: ObservableObject {
         commit(papers: updatedPapers, folders: folders)
     }
 
+    /// Move current records together so stale drag data cannot replace newer metadata.
+    @discardableResult
+    func movePapers(ids: [UUID], to folderID: UUID?) -> Bool {
+        guard canEdit() else { return false }
+        let selectedIDs = Set(ids)
+        guard !selectedIDs.isEmpty else {
+            errorMessage = "Choose at least one paper to move."
+            return false
+        }
+        guard folderExists(folderID) else {
+            errorMessage = "The destination folder no longer exists. Choose another folder and try again."
+            return false
+        }
+        guard selectedIDs.isSubset(of: Set(papers.map(\.id))) else {
+            errorMessage = "One or more selected papers no longer exist. Select the papers again and try another move."
+            return false
+        }
+
+        var updatedPapers = papers
+        var changed = false
+        for index in updatedPapers.indices where selectedIDs.contains(updatedPapers[index].id) {
+            if updatedPapers[index].folderID != folderID {
+                updatedPapers[index].folderID = folderID
+                changed = true
+            }
+        }
+        guard changed else {
+            errorMessage = nil
+            return true
+        }
+        return commit(papers: updatedPapers, folders: folders)
+    }
+
     func deletePaper(id: UUID) {
         guard canEdit(), let paper = papers.first(where: { $0.id == id }) else { return }
         // Persist first: a failed save must never remove a PDF that is still in the library.

@@ -10,6 +10,10 @@ struct LibraryStoreTests {
         do {
             try testImportAndPersistence()
             print("PASS: PDF import, metadata, persistence, folder changes, and deletion")
+            try testMovePapersAndPersistence()
+            print("PASS: Batch moves persist and retain paper metadata, order, and PDF files")
+            try testRejectedMovesAreAtomic()
+            print("PASS: Empty and stale paper or folder moves are rejected without partial changes")
             try testFailedSaveKeepsStateAndFiles()
             print("PASS: Failed saves preserve state and files and clean up failed imports")
             try testCorruptLibraryIsProtected()
@@ -75,6 +79,88 @@ struct LibraryStoreTests {
         try expect(LibraryStore(directory: directory).papers.count == 1, "Paper deletion should persist")
     }
 
+    private static func testMovePapersAndPersistence() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source, title: "Original title", author: "Original author")
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let readingID = try unwrap(store.addFolder(named: "Reading"), "Could not add source folder")
+        let favoriteID = try unwrap(store.addFolder(named: "Favorites"), "Could not add destination folder")
+        let ids = store.importPDFs(from: [source, source, source], into: readingID)
+        try expect(ids.count == 3, "Could not import papers for moving")
+
+        // Metadata may be edited after a drag begins; moves must use the latest records.
+        var edited = try unwrap(store.papers.first(where: { $0.id == ids[0] }), "Missing paper")
+        edited.title = "Current title"
+        edited.authors = "Current author"
+        edited.year = "2026"
+        edited.venue = "Current journal"
+        edited.doi = "10.0000/current"
+        store.updatePaper(edited)
+        let originalPapers = store.papers
+        let originalFolders = store.folders
+        let originalFiles = try Dictionary(uniqueKeysWithValues: originalPapers.map {
+            ($0.id, try Data(contentsOf: store.fileURL(for: $0)))
+        })
+
+        try expect(store.movePapers(ids: [ids[0], ids[1], ids[0]], to: favoriteID),
+                   "Moving multiple papers with duplicate IDs should succeed")
+        var expectedPapers = originalPapers.map { paper in
+            var updated = paper
+            if ids.prefix(2).contains(paper.id) { updated.folderID = favoriteID }
+            return updated
+        }
+        try expect(store.papers == expectedPapers && store.folders == originalFolders,
+                   "Moves should retain every paper, order, metadata, and folder")
+        let reopened = LibraryStore(directory: directory)
+        try expect(reopened.errorMessage == nil && reopened.papers == expectedPapers,
+                   "All moved papers should retain their assignments after reopening")
+        try expect(reopened.movePapers(ids: [ids[1]], to: nil), "A moved paper should be able to become unfiled")
+        let unfiledIndex = try unwrap(expectedPapers.firstIndex(where: { $0.id == ids[1] }), "Missing expected paper")
+        expectedPapers[unfiledIndex].folderID = nil
+        let afterUnfiling = LibraryStore(directory: directory)
+        try expect(afterUnfiling.papers == expectedPapers, "Unfiling should persist without other metadata changes")
+        for paper in originalPapers {
+            let current = try unwrap(afterUnfiling.papers.first(where: { $0.id == paper.id }), "Move lost a paper")
+            let url = afterUnfiling.fileURL(for: current)
+            let bytes = try Data(contentsOf: url)
+            try expect(url == store.fileURL(for: paper) && bytes == originalFiles[paper.id],
+                       "Moving papers must preserve each managed PDF's path and bytes")
+        }
+    }
+
+    private static func testRejectedMovesAreAtomic() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        let deletedFolderID = try unwrap(store.addFolder(named: "Removed"), "Could not add temporary folder")
+        let ids = store.importPDFs(from: [source, source])
+        try expect(ids.count == 2, "Could not import papers for stale move test")
+        store.deletePaper(id: ids[0])
+        store.deleteFolder(id: deletedFolderID)
+        let originalPapers = store.papers
+        let originalFolders = store.folders
+        let libraryURL = directory.appendingPathComponent("library.json")
+        let originalData = try Data(contentsOf: libraryURL)
+
+        try expect(!store.movePapers(ids: ids, to: folderID) && store.errorMessage != nil,
+                   "A deleted paper should reject the entire batch with an explanation")
+        try expect(store.papers == originalPapers, "A stale batch must not move its remaining valid papers")
+        try expect(!store.movePapers(ids: [ids[1]], to: deletedFolderID) && store.errorMessage != nil,
+                   "Moving to a deleted folder should fail with an explanation")
+        try expect(!store.movePapers(ids: [], to: folderID) && store.errorMessage != nil,
+                   "An empty move should be rejected with an explanation")
+        let afterAttempts = try Data(contentsOf: libraryURL)
+        try expect(store.papers == originalPapers && store.folders == originalFolders && afterAttempts == originalData,
+                   "Rejected moves must leave in-memory and saved library state unchanged")
+    }
+
     private static func testFailedSaveKeepsStateAndFiles() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -83,7 +169,8 @@ struct LibraryStoreTests {
         let directory = root.appendingPathComponent("Library")
         let store = LibraryStore(directory: directory)
         let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add folder")
-        _ = store.importPDFs(from: [source], into: folderID)
+        let ids = store.importPDFs(from: [source, source], into: folderID)
+        try expect(ids.count == 2, "Could not import papers for failed save test")
         let paper = try unwrap(store.papers.first, "Could not import test PDF")
         let originalPapers = store.papers
         let originalFolders = store.folders
@@ -91,6 +178,12 @@ struct LibraryStoreTests {
         try FileManager.default.removeItem(at: libraryURL)
         try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
 
+        try expect(store.movePapers(ids: ids, to: folderID),
+                   "Moving to the existing destination should succeed without attempting a disk write")
+        try expect(!store.movePapers(ids: ids, to: nil) && store.errorMessage != nil,
+                   "A failed batch move save should be reported")
+        try expect(store.papers == originalPapers && store.folders == originalFolders,
+                   "A failed batch move must preserve every paper's previous folder assignment")
         store.renameFolder(id: folderID, to: "Changed")
         try expect(store.folders == originalFolders && store.errorMessage != nil,
                    "A failed save must not publish a folder rename")
@@ -101,7 +194,7 @@ struct LibraryStoreTests {
         let imported = store.importPDFs(from: [source])
         try expect(imported.isEmpty && store.papers == originalPapers, "Failed imports must leave metadata untouched")
         let files = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
-        try expect(files == [paper.fileName], "A failed import must clean up its copied PDF")
+        try expect(Set(files) == Set(originalPapers.map(\.fileName)), "A failed import must clean up its copied PDF")
     }
 
     private static func testCorruptLibraryIsProtected() throws {
@@ -115,6 +208,8 @@ struct LibraryStoreTests {
         store.errorMessage = nil
         try expect(store.addFolder(named: "Must not overwrite") == nil, "Edits must be blocked after a loading failure")
         try expect(store.errorMessage != nil, "Dismissing the error must not unlock a corrupt library")
+        try expect(!store.movePapers(ids: [UUID()], to: nil) && store.errorMessage != nil,
+                   "Paper moves must also be blocked after a library loading failure")
         let afterAttempt = try Data(contentsOf: libraryURL)
         try expect(afterAttempt == corrupt, "Corrupt library bytes must remain untouched")
     }

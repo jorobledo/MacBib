@@ -31,15 +31,24 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>local.bib.app</string>
     <key>CFBundleName</key><string>Bib</string>
     <key>CFBundleDisplayName</key><string>Bib</string>
+    <key>CFBundleIconFile</key><string>AppIcon.icns</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array><dict>
+        <key>UTTypeIdentifier</key><string>local.bib.paper-reference</string>
+        <key>UTTypeDescription</key><string>Bib paper reference</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    </dict></array>
 </dict></plist>
 PLIST
 /bin/cp "$PROJECT_DIR/Bib/Resources/Welcome.pdf" "$APP_DIR/Contents/Resources/Welcome.pdf"
+/bin/cp "$PROJECT_DIR/Bib/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+/bin/cp "$PROJECT_DIR/Bib/Assets.xcassets/BibLogo.imageset/BibLogo.png" "$APP_DIR/Contents/Resources/BibLogo.png"
 /usr/bin/codesign --force --sign - "$APP_DIR"
 echo "Built: $APP_DIR"
 

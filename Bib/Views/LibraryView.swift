@@ -135,17 +135,20 @@ struct LibraryView: View {
             selectedPaperID = nil
             search = ""
         }
-        .onChange(of: store.papers) { _, papers in
-            if let id = selectedPaperID, !papers.contains(where: { $0.id == id }) { selectedPaperID = nil }
+        .onChange(of: store.papers) { _, _ in
+            if let id = selectedPaperID, !scopedPapers.contains(where: { $0.id == id }) { selectedPaperID = nil }
         }
     }
 
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "books.vertical.fill")
-                    .font(.title2)
-                    .foregroundStyle(BibTheme.accent)
+                Image("BibLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 38, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .accessibilityHidden(true)
                 Text("bib")
                     .font(.system(size: 32, weight: .semibold, design: .serif))
                 Spacer()
@@ -162,12 +165,14 @@ struct LibraryView: View {
                     NavigationLink(value: LibraryScope.unfiled) {
                         sidebarRow("Unfiled", symbol: "doc", count: store.papers.filter { $0.folderID == nil }.count)
                     }
+                    .modifier(PaperDropTarget(store: store, folderID: nil))
                 }
                 Section {
                     ForEach(store.folders) { folder in
                         NavigationLink(value: LibraryScope.folder(folder.id)) {
                             sidebarRow(folder.name, symbol: "folder", count: store.papers.filter { $0.folderID == folder.id }.count)
                         }
+                        .modifier(PaperDropTarget(store: store, folderID: folder.id))
                         .contextMenu {
                             Button("Rename folder", systemImage: "pencil") { beginFolderEdit(folder) }
                             Button("Delete folder", systemImage: "trash", role: .destructive) { folderToDelete = folder }
@@ -268,6 +273,14 @@ struct LibraryView: View {
                     ForEach(visiblePapers) { paper in
                         NavigationLink(value: paper.id) {
                             PaperRow(paper: paper)
+                        }
+                        .contentShape(Rectangle())
+                        .draggable(PaperDragItem(id: paper.id)) {
+                            Label(paper.title, systemImage: "doc.text")
+                                .lineLimit(2)
+                                .padding(12)
+                                .frame(maxWidth: 260, alignment: .leading)
+                                .background(BibTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
                     }

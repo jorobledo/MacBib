@@ -20,3 +20,14 @@ mkdir -p "$BUILD_DIR/ModuleCache"
     "$PROJECT_DIR/Tests/LibraryStoreTests.swift" \
     -o "$BUILD_DIR/LibraryStoreTests"
 "$BUILD_DIR/LibraryStoreTests"
+
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
+    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -module-cache-path "$BUILD_DIR/ModuleCache" \
+    "$PROJECT_DIR/Bib/Models/Paper.swift" \
+    "$PROJECT_DIR/Bib/Models/LibraryStore.swift" \
+    "$PROJECT_DIR/Bib/Views/Theme.swift" \
+    "$PROJECT_DIR/Bib/Views/PaperDragDrop.swift" \
+    "$PROJECT_DIR/Tests/PaperDragDropTests.swift" \
+    -o "$BUILD_DIR/PaperDragDropTests"
+"$BUILD_DIR/PaperDragDropTests"
