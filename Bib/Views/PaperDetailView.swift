@@ -46,6 +46,7 @@ struct PaperDetailView: View {
 
             if let url = existingPDFURL {
                 PDFReader(url: url, controller: reader)
+                    .id(url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView { missingPDF }

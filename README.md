@@ -36,6 +36,7 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 ## What works
 
 - Import one or several PDFs; Bib copies them into its library.
+- Store PDFs in **Documents/Bib** by default, or choose another folder using **Paper storage…**.
 - Paste an arXiv link to download a manuscript into **All papers** or a chosen folder, with available title, authors, year, journal reference, and DOI.
 - Import by DOI, with PDF retrieval when available and metadata-only records when access or downloading fails.
 - Open the publisher inside Bib to sign in with a subscription or institution account, then open its PDF to attach it to the saved paper. You can also attach a PDF from your files.
@@ -58,7 +59,7 @@ For a saved paper without a PDF, use **Open publisher & sign in**, sign in on th
 
 To highlight, select text in the PDF and click a color below the page. On iPhone, touch and hold a word, adjust the selection handles, then tap a color. Reselect the same text to change its color, or select part of a highlighted line and use the eraser to remove that line’s Bib highlight. Existing annotations imported from other apps are preserved. Scanned pages need a selectable text layer; encrypted or protected PDFs need an unprotected copy before highlighting.
 
-The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv and DOI imports need an internet connection and download asynchronously. Local PDF copies and library saves are synchronous, which is appropriate for a small initial library; background local import can be added later for larger batches.
+The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv and DOI imports need an internet connection and download asynchronously. Changing the PDF storage folder copies and verifies files in the background. Individual local PDF imports and library saves are synchronous, which is appropriate for a small initial library.
 
 ## Files and data
 
@@ -75,15 +76,22 @@ scripts/test.sh             Persistence and PDF import tests
 Tests/                     Isolated store tests
 ```
 
-Mac development builds (both Xcode and the script) store data in:
+Mac development builds (both Xcode and the script) use these default locations:
 
 ```text
 ~/Library/Application Support/Bib/
-  library.json
-  Documents/<generated-id>.pdf
+  library.json                 Metadata, logical folders, and chosen PDF location
+~/Documents/Bib/
+  <generated-id>.pdf            The PDFs used by the reader and highlight tools
 ```
 
-These local Mac development builds are not App Sandbox builds. iOS stores the same structure in its app container. Back up the entire `Bib` data folder to keep both metadata and PDFs; deleting the source project or `.build` does not remove the library. Imported originals are never modified. The JSON format is versioned, writes are atomic, and an unreadable library is protected from accidental overwriting.
+On the first launch of this version, Bib copies existing managed PDFs from `Application Support/Bib/Documents` into `Documents/Bib`, verifies that the copies match, and saves the new references. Highlights, metadata, paper IDs, and logical folders are preserved. The previous copies stay in their old location; Bib uses the new copies for reading and future highlights. Metadata-only DOI records remain in the library without a PDF. macOS may ask Bib for access to Documents.
+
+Use **Paper storage…** at the bottom of the sidebar (also in the **+** menu) to see the current location, reveal it in Finder, or **Choose folder…**. The selected folder is used directly; future local imports, downloads, and attachments go there. Folder choices persist across launches using bookmarks. Changing location copies all attached PDFs and switches only after verification and a successful library save. Missing or corrupt PDFs, differing files with the same name, and write failures leave the previous location active. Identical existing copies are reused; unrelated files are untouched. If a selected drive or folder is unavailable, reconnect or reselect it; Bib does not silently switch locations or recreate a missing folder. An empty library can choose a new location without recovering an unavailable old folder.
+
+On iPhone and iPad, the default is the app’s `Documents/Bib` directory, visible in **Files → On My iPhone/iPad → Bib → Bib**. The folder picker can select another available Files location. Library metadata stays in Application Support in the app container. Files access and persistence depend on the chosen provider; physical-device folder picking has not been verified here.
+
+These local Mac development builds are not App Sandbox builds. Back up both `library.json` and the selected PDF folder to keep the complete library. Stable generated filenames prevent title collisions; library topic folders are organizational metadata, not subdirectories on disk. Removing a paper deletes its managed PDF from the active storage folder, as before. Imported originals and previous storage copies are not modified. Deleting the source project or `.build` does not remove the library. The JSON format is versioned, writes are atomic, and an unreadable library is protected from accidental overwriting.
 
 ## Verify changes
 
@@ -97,6 +105,8 @@ Tests use temporary libraries and generated PDFs. They cover metadata extraction
 arXiv tests use simulated responses, so the suite needs no network. They cover link parsing, version matching, metadata fallback, invalid downloads, cancellation, temporary-file cleanup, request pacing, and saving downloaded metadata and PDFs into a chosen folder. A real arXiv download and saved-library reopen were also verified during implementation.
 
 DOI tests also use simulated responses and cover Crossref and CSL metadata, publisher PDF links, rejection of unrelated recommended-paper links, access-denied and network fallback, invalid PDFs, cancellation, and cleanup. Store tests cover metadata-only records, compatibility with existing libraries, and attaching PDFs without replacing current paper details. A real open-access DOI download, saved-library reopen, and the native transition from a metadata-only record to the PDF reader were verified. Subscription and institutional sign-in flows have not been tested with a live account.
+
+Storage tests cover legacy migration, persisted folder choices, later imports/downloads/attachments, byte-for-byte preservation, identical-file reuse, conflicting or corrupt files, unavailable folders, metadata-only libraries, cancellation, and failed-save rollback. All test libraries and PDF folders are isolated temporary directories.
 
 ## App artwork
 

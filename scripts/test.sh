@@ -17,6 +17,7 @@ mkdir -p "$BUILD_DIR/ModuleCache"
     -module-cache-path "$BUILD_DIR/ModuleCache" \
     "$PROJECT_DIR/Bib/Models/Paper.swift" \
     "$PROJECT_DIR/Bib/Models/LibraryStore.swift" \
+    "$PROJECT_DIR/Bib/Models/StorageFolderMigration.swift" \
     "$PROJECT_DIR/Tests/LibraryStoreTests.swift" \
     -o "$BUILD_DIR/LibraryStoreTests"
 "$BUILD_DIR/LibraryStoreTests"
@@ -26,6 +27,7 @@ mkdir -p "$BUILD_DIR/ModuleCache"
     -module-cache-path "$BUILD_DIR/ModuleCache" \
     "$PROJECT_DIR/Bib/Models/Paper.swift" \
     "$PROJECT_DIR/Bib/Models/LibraryStore.swift" \
+    "$PROJECT_DIR/Bib/Models/StorageFolderMigration.swift" \
     "$PROJECT_DIR/Bib/Views/Theme.swift" \
     "$PROJECT_DIR/Bib/Views/PaperDragDrop.swift" \
     "$PROJECT_DIR/Tests/PaperDragDropTests.swift" \
@@ -57,3 +59,21 @@ mkdir -p "$BUILD_DIR/ModuleCache"
     "$PROJECT_DIR/Tests/DOIImportTests.swift" \
     -o "$BUILD_DIR/DOIImportTests"
 "$BUILD_DIR/DOIImportTests"
+
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
+    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -module-cache-path "$BUILD_DIR/ModuleCache" \
+    "$PROJECT_DIR/Bib/Models/StorageFolderMigration.swift" \
+    "$PROJECT_DIR/Tests/StorageFolderMigrationTests.swift" \
+    -o "$BUILD_DIR/StorageFolderMigrationTests"
+"$BUILD_DIR/StorageFolderMigrationTests"
+
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
+    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -module-cache-path "$BUILD_DIR/ModuleCache" \
+    "$PROJECT_DIR/Bib/Models/Paper.swift" \
+    "$PROJECT_DIR/Bib/Models/StorageFolderMigration.swift" \
+    "$PROJECT_DIR/Bib/Models/LibraryStore.swift" \
+    "$PROJECT_DIR/Tests/StorageLocationTests.swift" \
+    -o "$BUILD_DIR/StorageLocationTests"
+"$BUILD_DIR/StorageLocationTests"

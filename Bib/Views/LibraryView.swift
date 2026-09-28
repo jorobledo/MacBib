@@ -25,6 +25,7 @@ struct LibraryView: View {
     @State private var importing = false
     @State private var importingArxiv = false
     @State private var importingDOI = false
+    @State private var showingStorage = false
     @State private var importNotice: String?
     @State private var pendingImportedPaperID: UUID?
     @State private var editingFolder = false
@@ -99,6 +100,7 @@ struct LibraryView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .disabled(store.isMovingStorage)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
@@ -125,7 +127,18 @@ struct LibraryView: View {
                 showImportedPaper(id, in: folderID)
             }
         }
+        .sheet(isPresented: $showingStorage) { StorageSettingsView(store: store) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let message = store.storageMessage {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.badge.questionmark")
+                    Text(message).font(.caption)
+                    Spacer(minLength: 0)
+                    Button("Paper storage…") { showingStorage = true }
+                }
+                .padding(12)
+                .background(.regularMaterial)
+            }
             if let importNotice {
                 HStack(spacing: 12) {
                     Image(systemName: "info.circle")
@@ -230,14 +243,23 @@ struct LibraryView: View {
             }
             .listStyle(.sidebar)
 
-            HStack(spacing: 6) {
-                Image(systemName: "internaldrive")
-                Text("On this device")
-                Spacer()
+            Button { showingStorage = true } label: {
+                HStack(spacing: 6) {
+                    if store.isMovingStorage {
+                        ProgressView().controlSize(.small)
+                        Text("Copying papers…")
+                    } else {
+                        Image(systemName: "folder")
+                        Text("Paper storage…")
+                    }
+                    Spacer()
+                }
             }
+            .buttonStyle(.plain)
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(20)
+            .help("Choose where Bib stores PDFs")
         }
         .navigationTitle("Library")
         #if os(macOS)
@@ -339,6 +361,8 @@ struct LibraryView: View {
                         .keyboardShortcut("i", modifiers: [.command, .shift])
                     Button("Import by DOI…", systemImage: "number") { importingDOI = true }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
+                    Divider()
+                    Button("Paper storage…", systemImage: "folder") { showingStorage = true }
                 } label: {
                     Label("Add papers", systemImage: "plus")
                 }

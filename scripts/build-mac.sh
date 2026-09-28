@@ -38,6 +38,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSDocumentsFolderUsageDescription</key><string>Bib stores and reads your paper PDFs in Documents/Bib or the folder you choose.</string>
     <key>UTExportedTypeDeclarations</key>
     <array><dict>
         <key>UTTypeIdentifier</key><string>local.bib.paper-reference</string>

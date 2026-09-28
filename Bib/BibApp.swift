@@ -8,6 +8,7 @@ struct BibApp: App {
         WindowGroup {
             LibraryView(store: library)
                 .tint(BibTheme.accent)
+                .task { await library.prepareStorageIfNeeded() }
                 #if os(macOS)
                 .frame(minWidth: 900, minHeight: 580)
                 #endif
