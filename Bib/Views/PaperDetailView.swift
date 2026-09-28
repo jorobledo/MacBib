@@ -38,6 +38,8 @@ struct PaperDetailView: View {
             }
 
             Divider()
+            highlightToolbar
+            Divider()
             HStack(spacing: 16) {
                 Text(reader.pageCount > 0 ? "Page \(reader.currentPage) of \(reader.pageCount)" : "PDF")
                     .font(.caption)
@@ -75,5 +77,72 @@ struct PaperDetailView: View {
         .sheet(isPresented: $editingMetadata) {
             MetadataEditor(store: store, paper: paper)
         }
+        .alert("Couldn’t save highlights", isPresented: Binding(
+            get: { reader.errorMessage != nil },
+            set: { if !$0 { reader.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { reader.errorMessage = nil }
+        } message: {
+            Text(reader.errorMessage ?? "Please try again.")
+        }
+    }
+
+    private var highlightToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                Label(reader.canHighlight ? "Highlight" : "Select text", systemImage: "highlighter")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                Spacer(minLength: 8)
+                highlightActions
+            }
+            highlightActions
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+        .background(BibTheme.canvas)
+        .help(reader.allowsHighlighting
+              ? "Select text in the PDF, then choose a highlight color. Select highlighted text and use the eraser to remove it."
+              : "Highlighting is unavailable for encrypted or protected PDFs.")
+    }
+
+    private var highlightActions: some View {
+        HStack(spacing: 2) {
+            ForEach(PDFHighlightColor.allCases) { color in
+                Button {
+                    reader.highlightSelection(color)
+                } label: {
+                    Circle()
+                        .fill(highlightSwatch(color))
+                        .frame(width: 19, height: 19)
+                        .overlay { Circle().strokeBorder(.primary.opacity(0.15), lineWidth: 1) }
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!reader.canHighlight)
+                .accessibilityLabel("Highlight selected text in \(color.rawValue)")
+                .help("Highlight selected text in \(color.rawValue)")
+            }
+            Divider().frame(height: 20).padding(.horizontal, 6)
+            Button(action: reader.removeHighlightsFromSelection) {
+                Image(systemName: "eraser")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(!reader.canRemoveHighlights)
+            .accessibilityLabel("Remove highlights from selected text")
+            .help("Remove Bib highlights from the selected text")
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func highlightSwatch(_ color: PDFHighlightColor) -> Color {
+        #if os(macOS)
+        Color(nsColor: color.color.withAlphaComponent(1))
+        #else
+        Color(uiColor: color.color.withAlphaComponent(1))
+        #endif
     }
 }

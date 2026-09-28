@@ -37,6 +37,7 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 - Create folders, rename them, and remove folders while keeping their papers.
 - Drag a paper from **All papers** onto a sidebar folder to move it there. The destination highlights as you hover. Papers stay visible in **All papers**; drop onto **Unfiled** to remove a folder assignment. Dragging also works from other paper lists when the sidebar is visible.
 - Read PDFs, select text, scroll, zoom, and fit the page.
+- Highlight selected text in yellow, green, blue, or pink. Highlights save automatically in Bib’s PDF copy and remain when you reopen the paper.
 - Edit title, authors, year, journal/venue, DOI, and folder using **ⓘ** in the reader.
 - Search metadata and sort by title, year, or when a paper was added.
 - Remove a paper from its details panel, with confirmation.
@@ -44,7 +45,9 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 
 Title and author are read from embedded PDF metadata when available. Otherwise the title comes from the filename. Other metadata is entered manually. The included PDF is a welcome guide, not a research paper.
 
-This first version is local to each device. It does not sync between Mac and iPhone, retrieve metadata online, generate citations, or add PDF annotations. Imports and saves run synchronously, which is appropriate for a small initial library; background import can be added later for larger batches.
+To highlight, select text in the PDF and click a color below the page. On iPhone, touch and hold a word, adjust the selection handles, then tap a color. Reselect the same text to change its color, or select part of a highlighted line and use the eraser to remove that line’s Bib highlight. Existing annotations imported from other apps are preserved. Scanned pages need a selectable text layer; encrypted or protected PDFs need an unprotected copy before highlighting.
+
+This first version is local to each device. It does not sync between Mac and iPhone, retrieve metadata online, or generate citations. Imports and saves run synchronously, which is appropriate for a small initial library; background import can be added later for larger batches.
 
 ## Files and data
 
@@ -77,7 +80,7 @@ These local Mac development builds are not App Sandbox builds. iOS stores the sa
 ./scripts/build-mac.sh
 ```
 
-Tests use temporary libraries and generated PDFs. They cover metadata extraction, reopening saved data, atomic folder moves, deleting folders without deleting papers, original-file preservation, failed-save rollback, corrupt-library protection, and invalid/password-protected PDF imports. Drag-and-drop tests exercise native item-provider encoding and reject malformed payloads, unrelated text, and papers or folders deleted during a drag. An expected CoreGraphics diagnostic may appear for the deliberately invalid PDF fixture.
+Tests use temporary libraries and generated PDFs. They cover metadata extraction, reopening saved data, atomic folder moves, deleting folders without deleting papers, original-file preservation, failed-save rollback, corrupt-library protection, and invalid/password-protected PDF imports. Drag-and-drop tests exercise native item-provider encoding and reject malformed payloads, unrelated text, and papers or folders deleted during a drag. Highlight tests verify saved colors, multiline and multipage selections, recoloring and removal after reopening, preserved text and imported annotations, write-failure rollback, and protection against overwriting another window’s changes. An expected CoreGraphics diagnostic may appear for the deliberately invalid PDF fixture.
 
 ## App artwork
 
