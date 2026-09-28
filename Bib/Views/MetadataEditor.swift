@@ -18,6 +18,10 @@ struct MetadataEditor: View {
                     TextField("Journal / venue", text: $paper.venue)
                     TextField("DOI", text: $paper.doi)
                         .autocorrectionDisabled()
+                    if let url = paper.doiURL {
+                        Link("Open DOI", destination: url)
+                    }
+                    LabeledContent("PDF", value: paper.hasPDF ? "In library" : "Not downloaded")
                 }
                 Section("Organization") {
                     Picker("Folder", selection: $paper.folderID) {
@@ -31,7 +35,7 @@ struct MetadataEditor: View {
                 Section {
                     Button("Remove from library", role: .destructive) { confirmingDelete = true }
                 } footer: {
-                    Text("Bib keeps its own copy of your PDF. Your original file stays where it is.")
+                    Text(paper.hasPDF ? "Bib keeps its own copy of your PDF. Your original file stays where it is." : "Paper details and the DOI link are saved even without a PDF.")
                 }
             }
             .formStyle(.grouped)
@@ -45,7 +49,12 @@ struct MetadataEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        store.updatePaper(paper)
+                        var updated = paper
+                        if let current = store.papers.first(where: { $0.id == paper.id }) {
+                            // A download may have attached a PDF while these details were being edited.
+                            updated.fileName = current.fileName
+                        }
+                        store.updatePaper(updated)
                         finishEditingIfSuccessful()
                     }
                     .disabled(paper.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -61,7 +70,7 @@ struct MetadataEditor: View {
                     }
                 }
             } message: {
-                Text("This removes the paper and Bib’s stored PDF copy. Your original file is unchanged.")
+                Text(paper.hasPDF ? "This removes the paper and Bib’s stored PDF copy. Your original file is unchanged." : "This removes the paper details and DOI link from your library.")
             }
             .alert("Couldn’t save changes", isPresented: Binding(
                 get: { saveError != nil },

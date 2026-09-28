@@ -47,8 +47,9 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func fileURL(for paper: Paper) -> URL {
-        documentsURL.appendingPathComponent(paper.fileName)
+    func fileURL(for paper: Paper) -> URL? {
+        guard let fileName = paper.fileName, isValidFileName(fileName) else { return nil }
+        return documentsURL.appendingPathComponent(fileName)
     }
 
     /// Each file is imported independently; one bad PDF does not discard successful imports.
@@ -61,6 +62,69 @@ final class LibraryStore: ObservableObject {
     @discardableResult
     func importDownloadedPDF(from url: URL, metadata: PaperMetadata?, into folderID: UUID? = nil) -> UUID? {
         importPDFs(from: [url], metadata: metadata, into: folderID).first
+    }
+
+    /// Keep the reference even when a publisher does not provide an accessible PDF.
+    @discardableResult
+    func importMetadata(_ metadata: PaperMetadata, into folderID: UUID? = nil) -> UUID? {
+        guard canEdit() else { return nil }
+        guard folderExists(folderID) else {
+            errorMessage = "The destination folder no longer exists. Choose another folder and try again."
+            return nil
+        }
+        guard let title = metadata.title.nonemptyTrimmed ?? metadata.doi.nonemptyTrimmed else {
+            errorMessage = "Give the paper a title or DOI before importing."
+            return nil
+        }
+        let paper = Paper(
+            title: title,
+            authors: metadata.authors.trimmed,
+            year: metadata.year.trimmed,
+            venue: metadata.venue.trimmed,
+            doi: metadata.doi.trimmed,
+            folderID: folderID
+        )
+        return commit(papers: [paper] + papers, folders: folders) ? paper.id : nil
+    }
+
+    /// Attach a copy to the latest saved reference without replacing metadata or folder edits.
+    @discardableResult
+    func attachPDF(from sourceURL: URL, to paperID: UUID) -> Bool {
+        guard canEdit() else { return false }
+        guard let index = papers.firstIndex(where: { $0.id == paperID }) else {
+            errorMessage = "This paper no longer exists. Choose another paper and try again."
+            return false
+        }
+        guard !papers[index].hasPDF else {
+            errorMessage = "This paper already has a PDF."
+            return false
+        }
+
+        let hasAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess { sourceURL.stopAccessingSecurityScopedResource() }
+        }
+        do {
+            _ = try validatedPDF(at: sourceURL)
+            let fileName = UUID().uuidString + ".pdf"
+            let destinationURL = documentsURL.appendingPathComponent(fileName)
+            try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            var updatedPapers = papers
+            updatedPapers[index].fileName = fileName
+            guard commit(papers: updatedPapers, folders: folders) else {
+                let saveError = errorMessage ?? "The library could not be saved."
+                do {
+                    try fileManager.removeItem(at: destinationURL)
+                } catch {
+                    errorMessage = saveError + " An unused copy also remains at \(destinationURL.path)."
+                }
+                return false
+            }
+            return true
+        } catch {
+            errorMessage = "\(sourceURL.lastPathComponent): \(error.localizedDescription)"
+            return false
+        }
     }
 
     private func importPDFs(from urls: [URL], metadata: PaperMetadata?, into folderID: UUID?) -> [UUID] {
@@ -80,17 +144,12 @@ final class LibraryStore: ObservableObject {
             }
 
             do {
-                guard sourceURL.isFileURL,
-                      sourceURL.pathExtension.lowercased() == "pdf",
-                      let document = PDFDocument(url: sourceURL) else {
-                    throw StoreError.invalidPDF
-                }
-                guard !document.isLocked else { throw StoreError.lockedPDF }
-                guard document.pageCount > 0 else { throw StoreError.emptyPDF }
+                let document = try validatedPDF(at: sourceURL)
 
                 let attributes = document.documentAttributes ?? [:]
                 let embeddedTitle = (attributes[PDFDocumentAttribute.titleAttribute] as? String)?.nonemptyTrimmed
                 let embeddedAuthors = (attributes[PDFDocumentAttribute.authorAttribute] as? String)?.trimmed ?? ""
+                let fileName = UUID().uuidString + ".pdf"
                 let paper = Paper(
                     title: metadata?.title.nonemptyTrimmed
                         ?? embeddedTitle
@@ -100,9 +159,9 @@ final class LibraryStore: ObservableObject {
                     venue: metadata?.venue.trimmed ?? "",
                     doi: metadata?.doi.trimmed ?? "",
                     folderID: folderID,
-                    fileName: UUID().uuidString + ".pdf"
+                    fileName: fileName
                 )
-                let destinationURL = fileURL(for: paper)
+                let destinationURL = documentsURL.appendingPathComponent(fileName)
                 try fileManager.copyItem(at: sourceURL, to: destinationURL)
 
                 if commit(papers: [paper] + papers, folders: folders) {
@@ -215,7 +274,7 @@ final class LibraryStore: ObservableObject {
         guard canEdit(), let paper = papers.first(where: { $0.id == id }) else { return }
         // Persist first: a failed save must never remove a PDF that is still in the library.
         guard commit(papers: papers.filter { $0.id != id }, folders: folders) else { return }
-        let url = fileURL(for: paper)
+        guard let url = fileURL(for: paper) else { return }
         if fileManager.fileExists(atPath: url.path) {
             do {
                 try fileManager.removeItem(at: url)
@@ -236,6 +295,25 @@ final class LibraryStore: ObservableObject {
 
     private func folderExists(_ id: UUID?) -> Bool {
         id == nil || folders.contains(where: { $0.id == id })
+    }
+
+    private func validatedPDF(at sourceURL: URL) throws -> PDFDocument {
+        guard sourceURL.isFileURL,
+              sourceURL.pathExtension.lowercased() == "pdf",
+              let document = PDFDocument(url: sourceURL) else {
+            throw StoreError.invalidPDF
+        }
+        guard !document.isLocked else { throw StoreError.lockedPDF }
+        guard document.pageCount > 0 else { throw StoreError.emptyPDF }
+        return document
+    }
+
+    private func isValidFileName(_ fileName: String) -> Bool {
+        !fileName.isEmpty
+            && !fileName.contains("\\")
+            && !fileName.contains("\0")
+            && fileName == (fileName as NSString).lastPathComponent
+            && (fileName as NSString).pathExtension.lowercased() == "pdf"
     }
 
     private func validFolderName(_ name: String, excluding id: UUID? = nil) -> String? {
@@ -277,13 +355,12 @@ final class LibraryStore: ObservableObject {
     private func validate(_ library: Library) throws {
         guard library.version == 1 else { throw StoreError.unsupportedVersion }
         let folderIDs = Set(library.folders.map(\.id))
+        let fileNames = library.papers.compactMap(\.fileName)
         guard Set(library.papers.map(\.id)).count == library.papers.count,
               folderIDs.count == library.folders.count,
-              Set(library.papers.map(\.fileName)).count == library.papers.count,
+              Set(fileNames).count == fileNames.count,
               library.papers.allSatisfy({ paper in
-                  !paper.fileName.isEmpty
-                      && paper.fileName == (paper.fileName as NSString).lastPathComponent
-                      && (paper.fileName as NSString).pathExtension.lowercased() == "pdf"
+                  (paper.fileName.map(isValidFileName) ?? true)
                       && (paper.folderID == nil || folderIDs.contains(paper.folderID!))
               }) else {
             throw StoreError.invalidLibrary

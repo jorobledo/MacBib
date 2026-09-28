@@ -48,3 +48,12 @@ mkdir -p "$BUILD_DIR/ModuleCache"
     "$PROJECT_DIR/Tests/ArxivImportTests.swift" \
     -o "$BUILD_DIR/ArxivImportTests"
 "$BUILD_DIR/ArxivImportTests"
+
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
+    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -module-cache-path "$BUILD_DIR/ModuleCache" \
+    "$PROJECT_DIR/Bib/Models/Paper.swift" \
+    "$PROJECT_DIR/Bib/Services/DOIImportService.swift" \
+    "$PROJECT_DIR/Tests/DOIImportTests.swift" \
+    -o "$BUILD_DIR/DOIImportTests"
+"$BUILD_DIR/DOIImportTests"

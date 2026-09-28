@@ -24,6 +24,7 @@ struct LibraryView: View {
     @State private var sort: PaperSort = .newest
     @State private var importing = false
     @State private var importingArxiv = false
+    @State private var importingDOI = false
     @State private var importNotice: String?
     @State private var pendingImportedPaperID: UUID?
     @State private var editingFolder = false
@@ -116,6 +117,12 @@ struct LibraryView: View {
             ArxivImportView(store: store, initialFolderID: currentScope.folderID) { id, folderID, warning in
                 showImportedPaper(id, in: folderID)
                 importNotice = warning == nil ? nil : "The PDF was imported, but arXiv’s paper details weren’t available. You can edit them using Paper details."
+            }
+        }
+        .sheet(isPresented: $importingDOI) {
+            DOIImportView(store: store, initialFolderID: currentScope.folderID) { id, folderID in
+                importNotice = nil
+                showImportedPaper(id, in: folderID)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -284,6 +291,8 @@ struct LibraryView: View {
                                 .buttonStyle(.borderedProminent)
                             Button("Import from arXiv…", systemImage: "link") { importingArxiv = true }
                                 .buttonStyle(.borderless)
+                            Button("Import by DOI…", systemImage: "number") { importingDOI = true }
+                                .buttonStyle(.borderless)
                             if store.papers.isEmpty {
                                 Button("Try a sample paper", action: importWelcome)
                                     .buttonStyle(.borderless)
@@ -328,10 +337,12 @@ struct LibraryView: View {
                         .keyboardShortcut("i", modifiers: .command)
                     Button("Import from arXiv…", systemImage: "link") { importingArxiv = true }
                         .keyboardShortcut("i", modifiers: [.command, .shift])
+                    Button("Import by DOI…", systemImage: "number") { importingDOI = true }
+                        .keyboardShortcut("d", modifiers: [.command, .shift])
                 } label: {
                     Label("Add papers", systemImage: "plus")
                 }
-                .help("Import PDFs or add an arXiv link")
+                .help("Import PDFs, an arXiv link, or a DOI")
             }
         }
     }
@@ -437,7 +448,7 @@ private struct PaperRow: View {
                         .lineLimit(1)
                 }
                 HStack(spacing: 6) {
-                    Text("PDF")
+                    Text(paper.hasPDF ? "PDF" : "No PDF")
                         .font(.system(size: 9, weight: .medium))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)

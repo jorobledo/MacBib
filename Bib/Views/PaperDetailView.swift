@@ -1,11 +1,21 @@
 import SwiftUI
 import PDFKit
+import UniformTypeIdentifiers
 
 struct PaperDetailView: View {
     @ObservedObject var store: LibraryStore
     let paper: Paper
     @State private var editingMetadata = false
+    @State private var showingPublisher = false
+    @State private var attachingPDF = false
+    @State private var downloadTask: Task<Void, Never>?
+    @State private var downloadMessage: String?
     @StateObject private var reader = PDFReaderController()
+
+    private var existingPDFURL: URL? {
+        guard let url = store.fileURL(for: paper), FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,44 +32,51 @@ struct PaperDetailView: View {
                         .lineLimit(2)
                         .textSelection(.enabled)
                 }
+                if let url = paper.doiURL {
+                    Link("DOI: \(paper.doi)", destination: url)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .help("Open the DOI in your browser")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
             .background(BibTheme.canvas)
             Divider()
 
-            if FileManager.default.fileExists(atPath: store.fileURL(for: paper).path) {
-                PDFReader(url: store.fileURL(for: paper), controller: reader)
+            if let url = existingPDFURL {
+                PDFReader(url: url, controller: reader)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                QuietPlaceholder(symbol: "doc.questionmark", title: "PDF not found", message: "The stored copy is missing. Import the original PDF again to continue reading.") {
-                    Button("Paper details") { editingMetadata = true }
-                }
+                ScrollView { missingPDF }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            Divider()
-            highlightToolbar
-            Divider()
-            HStack(spacing: 16) {
-                Text(reader.pageCount > 0 ? "Page \(reader.currentPage) of \(reader.pageCount)" : "PDF")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                Spacer()
-                Button(action: reader.zoomOut) { Image(systemName: "minus.magnifyingglass") }
-                    .help("Zoom out")
-                    .accessibilityLabel("Zoom out")
-                Button("Fit", action: reader.zoomToFit)
-                    .font(.caption)
-                    .help("Fit page to window")
-                Button(action: reader.zoomIn) { Image(systemName: "plus.magnifyingglass") }
-                    .help("Zoom in")
-                    .accessibilityLabel("Zoom in")
+            if existingPDFURL != nil {
+                Divider()
+                highlightToolbar
+                Divider()
+                HStack(spacing: 16) {
+                    Text(reader.pageCount > 0 ? "Page \(reader.currentPage) of \(reader.pageCount)" : "PDF")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Spacer()
+                    Button(action: reader.zoomOut) { Image(systemName: "minus.magnifyingglass") }
+                        .help("Zoom out")
+                        .accessibilityLabel("Zoom out")
+                    Button("Fit", action: reader.zoomToFit)
+                        .font(.caption)
+                        .help("Fit page to window")
+                    Button(action: reader.zoomIn) { Image(systemName: "plus.magnifyingglass") }
+                        .help("Zoom in")
+                        .accessibilityLabel("Zoom in")
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(BibTheme.canvas)
             }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(BibTheme.canvas)
         }
         .background(BibTheme.readerBackground)
         .navigationTitle("Reader")
@@ -77,6 +94,27 @@ struct PaperDetailView: View {
         .sheet(isPresented: $editingMetadata) {
             MetadataEditor(store: store, paper: paper)
         }
+        .sheet(isPresented: $showingPublisher) {
+            PublisherAccessView(store: store, paper: paper)
+        }
+        .fileImporter(isPresented: $attachingPDF, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first, !store.attachPDF(from: url, to: paper.id) {
+                    takeStoreError()
+                }
+            case .failure(let error):
+                if (error as NSError).code != NSUserCancelledError { downloadMessage = error.localizedDescription }
+            }
+        }
+        .alert("PDF download", isPresented: Binding(
+            get: { downloadMessage != nil },
+            set: { if !$0 { downloadMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { downloadMessage = nil }
+        } message: {
+            Text(downloadMessage ?? "Please try again.")
+        }
         .alert("Couldn’t save highlights", isPresented: Binding(
             get: { reader.errorMessage != nil },
             set: { if !$0 { reader.errorMessage = nil } }
@@ -85,6 +123,77 @@ struct PaperDetailView: View {
         } message: {
             Text(reader.errorMessage ?? "Please try again.")
         }
+        .onDisappear { downloadTask?.cancel() }
+    }
+
+    private var missingPDF: some View {
+        QuietPlaceholder(
+            symbol: paper.hasPDF ? "doc.questionmark" : "doc.text",
+            title: paper.hasPDF ? "PDF not found" : "Paper details saved",
+            message: paper.hasPDF
+                ? "The stored copy is missing. Import the original PDF again to continue reading."
+                : "This paper is in your library without a PDF. Open the publisher to use your subscription or institutional access, or attach a PDF you already have."
+        ) {
+            VStack(spacing: 12) {
+                if !paper.hasPDF {
+                    if paper.doiURL != nil {
+                        Button("Open publisher & sign in", systemImage: "globe") { showingPublisher = true }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(downloadTask != nil)
+                        if downloadTask != nil {
+                            HStack(spacing: 10) {
+                                ProgressView().controlSize(.small)
+                                Text("Looking for a PDF…").font(.caption)
+                                Button("Cancel") { downloadTask?.cancel() }
+                            }
+                        } else {
+                            Button("Try PDF download again", action: retryDownload)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Attach PDF…", systemImage: "paperclip") { attachingPDF = true }
+                        .disabled(downloadTask != nil)
+                }
+                Button("Paper details") { editingMetadata = true }
+                    .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private func retryDownload() {
+        guard downloadTask == nil, !paper.hasPDF else { return }
+        let reference: DOIReference
+        do { reference = try DOIReference(paper.doi) }
+        catch { downloadMessage = error.localizedDescription; return }
+        downloadTask = Task { @MainActor in
+            defer { downloadTask = nil }
+            do {
+                let result = try await DOIImportService.shared.importPaper(reference)
+                defer { result.removeTemporaryFiles() }
+                try Task.checkCancellation()
+                if let url = result.fileURL {
+                    guard let current = store.papers.first(where: { $0.id == paper.id }),
+                          let currentReference = try? DOIReference(current.doi),
+                          currentReference.id.caseInsensitiveCompare(reference.id) == .orderedSame else {
+                        downloadMessage = "This paper was removed or its DOI changed while downloading. The PDF was not attached. Try again with the current DOI."
+                        return
+                    }
+                    if !store.attachPDF(from: url, to: paper.id) { takeStoreError() }
+                } else {
+                    downloadMessage = (result.notice ?? "No downloadable PDF was found.")
+                        + "\n\nYour saved paper details and DOI link are unchanged."
+                }
+            } catch {
+                if !Task.isCancelled, !(error is CancellationError) {
+                    downloadMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func takeStoreError() {
+        downloadMessage = store.errorMessage ?? "The PDF could not be attached. Please try again."
+        store.errorMessage = nil
     }
 
     private var highlightToolbar: some View {

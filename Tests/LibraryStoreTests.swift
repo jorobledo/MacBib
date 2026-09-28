@@ -18,6 +18,16 @@ struct LibraryStoreTests {
             print("PASS: Downloaded PDFs reject folders deleted while retrieval was in progress")
             try testDownloadedPDFFailedSaveCleansUp()
             print("PASS: Failed download imports leave no published paper or managed copy")
+            try testMetadataOnlyReferences()
+            print("PASS: Metadata-only references persist, link to DOI, and delete without touching PDFs")
+            try testLegacyLibraryAndFileValidation()
+            print("PASS: Legacy PDF records reopen and unsafe or duplicate managed paths are rejected")
+            try testAttachPDFPreservesReference()
+            print("PASS: Attaching a PDF retains the latest metadata, folder, identity, and original file")
+            try testRejectedAttachments()
+            print("PASS: Invalid PDFs and stale or already attached references cannot alter the library")
+            try testFailedMetadataAndAttachmentSave()
+            print("PASS: Failed reference and attachment saves preserve state and clean up copied files")
             try testMovePapersAndPersistence()
             print("PASS: Batch moves persist and retain paper metadata, order, and PDF files")
             try testRejectedMovesAreAtomic()
@@ -56,7 +66,7 @@ struct LibraryStoreTests {
         try expect(paper.authors == "Ada Example", "PDF author should be extracted")
         try expect(store.papers.first(where: { $0.id == ids[1] })?.title == "Fallback title",
                    "A missing PDF title should use the filename")
-        let managedURL = store.fileURL(for: paper)
+        let managedURL = try unwrap(store.fileURL(for: paper), "Imported PDF should have a managed URL")
         try expect(managedURL != source && FileManager.default.fileExists(atPath: managedURL.path),
                    "The PDF should have its own managed copy")
 
@@ -111,7 +121,7 @@ struct LibraryStoreTests {
                    && paper.year == "2026" && paper.venue == "Example Journal" && paper.doi == "10.0000/fetched",
                    "Nonempty fetched metadata should override PDF metadata and be trimmed")
         try expect(paper.folderID == folderID, "The downloaded paper should be assigned to the chosen folder")
-        let managedURL = store.fileURL(for: paper)
+        let managedURL = try unwrap(store.fileURL(for: paper), "Downloaded PDF should have a managed URL")
         let managedBytes = try Data(contentsOf: managedURL)
         let sourceAfterImport = try Data(contentsOf: source)
         try expect(managedURL != source && managedBytes == sourceBytes && sourceAfterImport == sourceBytes,
@@ -204,6 +214,214 @@ struct LibraryStoreTests {
                    "A failed download import must remove its managed copy and preserve the original PDF")
     }
 
+    private static func testMetadataOnlyReferences() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not create reference folder")
+        let attachedID = try unwrap(store.importPDFs(from: [source]).first, "Could not import a separate PDF")
+        let attached = try unwrap(store.papers.first(where: { $0.id == attachedID }), "Missing PDF")
+        let attachedURL = try unwrap(store.fileURL(for: attached), "Missing managed PDF URL")
+        let attachedBytes = try Data(contentsOf: attachedURL)
+        let id = try unwrap(store.importMetadata(PaperMetadata(
+            title: "  A reference\n", authors: " Ada Example ", year: " 2026 ",
+            venue: " Example Journal ", doi: " 10.1234/example "), into: folderID),
+            "Could not import metadata: \(store.errorMessage ?? "")")
+        let paper = try unwrap(store.papers.first(where: { $0.id == id }), "Missing metadata-only paper")
+        try expect(paper.title == "A reference" && paper.authors == "Ada Example" && paper.year == "2026"
+                   && paper.venue == "Example Journal" && paper.doi == "10.1234/example" && paper.folderID == folderID,
+                   "Metadata-only import should trim and preserve every fetched field and folder")
+        try expect(!paper.hasPDF && paper.fileName == nil && store.fileURL(for: paper) == nil,
+                   "A metadata-only paper must not resolve to the Documents directory")
+        try expect(paper.doiURL?.absoluteString == "https://doi.org/10.1234/example",
+                   "The DOI should provide a canonical resolver link")
+        let fallbackID = try unwrap(store.importMetadata(PaperMetadata(doi: " 10.1234/fallback ")),
+                                    "A DOI should provide a title fallback")
+        try expect(store.papers.first(where: { $0.id == fallbackID })?.title == "10.1234/fallback",
+                   "A missing title should fall back to the DOI")
+        let beforeInvalidImport = store.papers
+        try expect(store.importMetadata(PaperMetadata()) == nil && store.errorMessage != nil,
+                   "Completely empty metadata should be rejected")
+        try expect(store.importMetadata(PaperMetadata(title: "Stale"), into: UUID()) == nil,
+                   "A metadata-only import must reject a deleted destination")
+        try expect(store.papers == beforeInvalidImport, "Rejected references should leave the library unchanged")
+
+        let reopened = LibraryStore(directory: directory)
+        try expect(reopened.errorMessage == nil && reopened.papers == store.papers && reopened.folders == store.folders,
+                   "Multiple metadata-only references and PDF records should reopen together")
+        reopened.deletePaper(id: id)
+        reopened.deletePaper(id: fallbackID)
+        let retainedBytes = try Data(contentsOf: attachedURL)
+        var isDirectory: ObjCBool = false
+        try expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Documents").path,
+                                                 isDirectory: &isDirectory) && isDirectory.boolValue,
+                   "Deleting references must keep the managed Documents directory")
+        try expect(reopened.papers == [attached] && retainedBytes == attachedBytes,
+                   "Deleting metadata-only references must leave existing PDFs and their records intact")
+        let afterDeletion = LibraryStore(directory: directory)
+        try expect(afterDeletion.papers == [attached], "Reference deletion should persist")
+
+        let withSpecialSuffix = Paper(title: "DOI", doi: "doi:10.1234/a?query#fragment")
+        let specialURL = try unwrap(withSpecialSuffix.doiURL, "DOI suffix punctuation should be encoded")
+        let specialComponents = try unwrap(URLComponents(url: specialURL, resolvingAgainstBaseURL: false),
+                                           "Could not inspect DOI link")
+        try expect(specialComponents.host == "doi.org" && specialComponents.query == nil
+                   && specialComponents.fragment == nil && specialComponents.path == "/10.1234/a?query#fragment",
+                   "DOI suffixes must stay inside the resolver path")
+        try expect(Paper(title: "DOI", doi: "https://dx.doi.org/10.1234/example").doiURL == paper.doiURL,
+                   "Legacy DOI resolver URLs should canonicalize to HTTPS doi.org")
+        try expect(Paper(title: "DOI", doi: "https://example.com/10.1234/example").doiURL == nil
+                   && Paper(title: "DOI", doi: "javascript:alert(1)").doiURL == nil,
+                   "Edited DOI metadata must never produce an unrelated or unsafe link")
+    }
+
+    private static func testLegacyLibraryAndFileValidation() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID()
+        let fileName = UUID().uuidString + ".pdf"
+        var legacy: [String: Any] = [
+            "id": id.uuidString, "title": "Legacy paper", "authors": "Original author", "year": "2025",
+            "venue": "Journal", "doi": "10.1234/legacy", "fileName": fileName, "addedAt": 0
+        ]
+        let libraryURL = root.appendingPathComponent("library.json")
+        try JSONSerialization.data(withJSONObject: ["version": 1, "papers": [legacy], "folders": []])
+            .write(to: libraryURL)
+        let legacyStore = LibraryStore(directory: root)
+        let legacyPaper = try unwrap(legacyStore.papers.first, "Existing version-one record did not decode")
+        try expect(legacyStore.errorMessage == nil && legacyPaper.id == id && legacyPaper.fileName == fileName
+                   && legacyPaper.hasPDF && legacyStore.fileURL(for: legacyPaper)?.lastPathComponent == fileName,
+                   "Existing version-one records with required fileName must remain compatible")
+
+        for invalidName in ["../escape.pdf", "/tmp/escape.pdf", "folder/escape.pdf", "folder\\escape.pdf", "", "notes.txt"] {
+            legacy["fileName"] = invalidName
+            try JSONSerialization.data(withJSONObject: ["version": 1, "papers": [legacy], "folders": []])
+                .write(to: libraryURL)
+            let invalidStore = LibraryStore(directory: root)
+            try expect(invalidStore.errorMessage != nil && invalidStore.papers.isEmpty,
+                       "Unsafe managed file name should be rejected: \(invalidName)")
+            var externalPaper = legacyPaper
+            externalPaper.fileName = invalidName
+            try expect(legacyStore.fileURL(for: externalPaper) == nil,
+                       "fileURL must reject an unsafe supplied record even before persistence")
+        }
+        legacy["fileName"] = fileName
+        var duplicate = legacy
+        duplicate["id"] = UUID().uuidString
+        try JSONSerialization.data(withJSONObject: ["version": 1, "papers": [legacy, duplicate], "folders": []])
+            .write(to: libraryURL)
+        try expect(LibraryStore(directory: root).errorMessage != nil,
+                   "Two references cannot own the same managed PDF")
+        legacy.removeValue(forKey: "fileName")
+        duplicate["fileName"] = NSNull()
+        try JSONSerialization.data(withJSONObject: ["version": 1, "papers": [legacy, duplicate], "folders": []])
+            .write(to: libraryURL)
+        let metadataStore = LibraryStore(directory: root)
+        try expect(metadataStore.errorMessage == nil && metadataStore.papers.count == 2
+                   && metadataStore.papers.allSatisfy { !$0.hasPDF },
+                   "Both absent and null attachments should decode without nil being treated as a duplicate file")
+    }
+
+    private static func testAttachPDFPreservesReference() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("downloaded.pdf")
+        try makePDF(at: source, title: "PDF title must not replace reference", author: "PDF author")
+        let sourceBytes = try Data(contentsOf: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not create destination")
+        let id = try unwrap(store.importMetadata(PaperMetadata(title: "Initial", doi: "10.1234/attach")),
+                            "Could not import metadata-only reference")
+        // A download can finish after the user has edited or moved its reference.
+        var latest = try unwrap(store.papers.first, "Missing initial reference")
+        latest.title = "Current title"
+        latest.authors = "Current author"
+        latest.year = "2026"
+        latest.venue = "Current journal"
+        latest.doi = "10.1234/current"
+        store.updatePaper(latest)
+        try expect(store.movePapers(ids: [id], to: folderID), "Could not move reference before attaching")
+        latest = try unwrap(store.papers.first, "Missing current reference")
+        try expect(store.attachPDF(from: source, to: id), "Could not attach PDF: \(store.errorMessage ?? "")")
+        let attached = try unwrap(store.papers.first, "Attachment lost the reference")
+        let managedURL = try unwrap(store.fileURL(for: attached), "Attachment needs a managed URL")
+        latest.fileName = attached.fileName
+        let managedBytes = try Data(contentsOf: managedURL)
+        let sourceAfterAttachment = try Data(contentsOf: source)
+        try expect(attached.hasPDF && attached == latest && store.papers.count == 1,
+                   "Attachment must retain current metadata, folder, identity, and date without duplicating the paper")
+        try expect(managedURL != source && managedBytes == sourceBytes && sourceAfterAttachment == sourceBytes,
+                   "Attachment must copy the downloaded PDF and leave its original intact")
+        let reopened = LibraryStore(directory: directory)
+        try expect(reopened.errorMessage == nil && reopened.papers == [attached],
+                   "The attachment and unchanged reference details should survive reopening")
+    }
+
+    private static func testRejectedAttachments() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("valid.pdf")
+        let invalid = root.appendingPathComponent("invalid.pdf")
+        let locked = root.appendingPathComponent("locked.pdf")
+        try makePDF(at: source)
+        try Data("not a PDF".utf8).write(to: invalid)
+        let document = try unwrap(PDFDocument(url: source), "Could not create locked attachment")
+        try expect(document.write(to: locked, withOptions: [.userPasswordOption: "secret", .ownerPasswordOption: "owner"]),
+                   "Could not write locked attachment")
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let id = try unwrap(store.importMetadata(PaperMetadata(title: "Reference")), "Could not create reference")
+        let originalPapers = store.papers
+        for invalidSource in [invalid, locked, root.appendingPathComponent("missing.pdf")] {
+            try expect(!store.attachPDF(from: invalidSource, to: id) && store.errorMessage != nil,
+                       "Invalid, locked, and missing attachments must be rejected")
+            try expect(store.papers == originalPapers, "Rejected PDFs must not change reference data")
+        }
+        try expect(!store.attachPDF(from: source, to: UUID()) && store.errorMessage?.contains("no longer exists") == true,
+                   "A download for a deleted reference must not create a new paper")
+        var managedFiles = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
+        try expect(managedFiles.isEmpty, "Rejected attachments must not leave copied files")
+        try expect(store.attachPDF(from: source, to: id), "A valid PDF should still attach after rejected attempts")
+        let attachedPapers = store.papers
+        try expect(!store.attachPDF(from: source, to: id) && store.errorMessage?.contains("already has a PDF") == true,
+                   "A retry must not replace an existing attachment")
+        managedFiles = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
+        try expect(store.papers == attachedPapers && managedFiles.count == 1,
+                   "Duplicate attachment must leave the saved paper and its single file untouched")
+    }
+
+    private static func testFailedMetadataAndAttachmentSave() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("downloaded.pdf")
+        try makePDF(at: source)
+        let sourceBytes = try Data(contentsOf: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not create destination")
+        let id = try unwrap(store.importMetadata(PaperMetadata(title: "Reference", doi: "10.1234/original"), into: folderID),
+                            "Could not create initial reference")
+        let originalPapers = store.papers
+        let originalFolders = store.folders
+        let libraryURL = directory.appendingPathComponent("library.json")
+        try FileManager.default.removeItem(at: libraryURL)
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
+        try expect(store.importMetadata(PaperMetadata(title: "Failed import", doi: "10.1234/new")) == nil
+                   && store.errorMessage != nil && store.papers == originalPapers && store.folders == originalFolders,
+                   "A failed metadata save must not publish a new paper or alter folders")
+        try expect(!store.attachPDF(from: source, to: id) && store.errorMessage != nil,
+                   "A failed attachment save must report the problem")
+        let managedFiles = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
+        let sourceAfterAttachment = try Data(contentsOf: source)
+        try expect(store.papers == originalPapers && store.folders == originalFolders && managedFiles.isEmpty,
+                   "A failed attachment must retain the unattached reference and remove its unused managed copy")
+        try expect(sourceAfterAttachment == sourceBytes, "Attachment rollback must preserve the original download")
+    }
+
     private static func testMovePapersAndPersistence() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -227,7 +445,7 @@ struct LibraryStoreTests {
         let originalPapers = store.papers
         let originalFolders = store.folders
         let originalFiles = try Dictionary(uniqueKeysWithValues: originalPapers.map {
-            ($0.id, try Data(contentsOf: store.fileURL(for: $0)))
+            ($0.id, try Data(contentsOf: unwrap(store.fileURL(for: $0), "Moved PDF should have a managed URL")))
         })
 
         try expect(store.movePapers(ids: [ids[0], ids[1], ids[0]], to: favoriteID),
@@ -249,7 +467,7 @@ struct LibraryStoreTests {
         try expect(afterUnfiling.papers == expectedPapers, "Unfiling should persist without other metadata changes")
         for paper in originalPapers {
             let current = try unwrap(afterUnfiling.papers.first(where: { $0.id == paper.id }), "Move lost a paper")
-            let url = afterUnfiling.fileURL(for: current)
+            let url = try unwrap(afterUnfiling.fileURL(for: current), "Moved PDF should retain its managed URL")
             let bytes = try Data(contentsOf: url)
             try expect(url == store.fileURL(for: paper) && bytes == originalFiles[paper.id],
                        "Moving papers must preserve each managed PDF's path and bytes")
@@ -314,12 +532,13 @@ struct LibraryStoreTests {
                    "A failed save must not publish a folder rename")
         store.deletePaper(id: paper.id)
         try expect(store.papers == originalPapers, "A failed save must not remove paper metadata")
-        try expect(FileManager.default.fileExists(atPath: store.fileURL(for: paper).path),
+        let retainedURL = try unwrap(store.fileURL(for: paper), "Failed save should retain managed URL")
+        try expect(FileManager.default.fileExists(atPath: retainedURL.path),
                    "A failed save must not delete an existing PDF")
         let imported = store.importPDFs(from: [source])
         try expect(imported.isEmpty && store.papers == originalPapers, "Failed imports must leave metadata untouched")
         let files = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
-        try expect(Set(files) == Set(originalPapers.map(\.fileName)), "A failed import must clean up its copied PDF")
+        try expect(Set(files) == Set(originalPapers.compactMap(\.fileName)), "A failed import must clean up its copied PDF")
     }
 
     private static func testCorruptLibraryIsProtected() throws {

@@ -14,6 +14,8 @@ This compiles the Swift sources, bundles the welcome PDF and app artwork, signs 
 
 Click **Try a sample paper** to explore the reader, or use **+ → Import PDFs…** / **⌘I** to import your own PDFs. **+ → Import from arXiv…** / **⌘⇧I** lets you paste an arXiv link and choose where to put the paper.
 
+Use **+ → Import by DOI…** / **⌘⇧D** for a DOI or `https://doi.org/…` link. Choose **All papers** or a folder; Bib fetches paper details and attempts to download the PDF. If the PDF cannot be retrieved, Bib saves the details and a clickable DOI link and shows a popup explaining why.
+
 The script uses the Command Line Tools when installed. To choose a different toolchain:
 
 ```sh
@@ -35,6 +37,8 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 
 - Import one or several PDFs; Bib copies them into its library.
 - Paste an arXiv link to download a manuscript into **All papers** or a chosen folder, with available title, authors, year, journal reference, and DOI.
+- Import by DOI, with PDF retrieval when available and metadata-only records when access or downloading fails.
+- Open the publisher inside Bib to sign in with a subscription or institution account, then open its PDF to attach it to the saved paper. You can also attach a PDF from your files.
 - Create folders, rename them, and remove folders while keeping their papers.
 - Drag a paper from **All papers** onto a sidebar folder to move it there. The destination highlights as you hover. Papers stay visible in **All papers**; drop onto **Unfiled** to remove a folder assignment. Dragging also works from other paper lists when the sidebar is visible.
 - Read PDFs, select text, scroll, zoom, and fit the page.
@@ -48,9 +52,13 @@ For local PDF imports, title and author are read from embedded PDF metadata when
 
 For arXiv, paste an abstract (`arxiv.org/abs/…`), PDF (`arxiv.org/pdf/…`), or HTML paper link, or the paper’s identifier. Versioned and legacy identifiers are supported. The import defaults to the folder you are browsing; choose **All papers (no folder)** for an unfiled paper. Every imported paper also appears in **All papers**. A progress indicator and Cancel button remain available while downloading. If paper details are temporarily unavailable, the PDF can still import using its embedded metadata, with a notice. The importer uses the [official arXiv API](https://info.arxiv.org/help/api/user-manual.html) and follows its [request limits](https://info.arxiv.org/help/api/tou.html).
 
+DOI imports use [Crossref metadata](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) and [DOI content negotiation](https://www.crossref.org/documentation/retrieve-metadata/content-negotiation/), then try PDF links supplied by the publisher. Public PDFs and access granted through your network, such as an institutional VPN, can download automatically. Publisher login requirements, missing PDF links, and connection failures leave a **No PDF** record that remains searchable, editable, and movable between folders. A failed connection is not treated as proof that a subscription is required. Invalid DOIs or unavailable metadata show an error without creating an empty paper.
+
+For a saved paper without a PDF, use **Open publisher & sign in**, sign in on the publisher or institution’s site, and open its PDF. Bib attaches the downloaded file to that same record. WebKit keeps the publisher session inside Bib; Safari and other browser logins are not shared. Some publisher or institutional login flows may not work in an embedded browser. In that case, open the DOI link in your usual browser, download the PDF using your access, then choose **Attach PDF…** in Bib. **Try PDF download again** also lets you retry after connecting to your institution’s network. The importer does not bypass subscription checks, and discovering a PDF is not guaranteed for every publisher.
+
 To highlight, select text in the PDF and click a color below the page. On iPhone, touch and hold a word, adjust the selection handles, then tap a color. Reselect the same text to change its color, or select part of a highlighted line and use the eraser to remove that line’s Bib highlight. Existing annotations imported from other apps are preserved. Scanned pages need a selectable text layer; encrypted or protected PDFs need an unprotected copy before highlighting.
 
-The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv imports need an internet connection and download asynchronously. Local PDF copies and library saves are synchronous, which is appropriate for a small initial library; background local import can be added later for larger batches.
+The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv and DOI imports need an internet connection and download asynchronously. Local PDF copies and library saves are synchronous, which is appropriate for a small initial library; background local import can be added later for larger batches.
 
 ## Files and data
 
@@ -58,7 +66,7 @@ The library stays local to each device; it does not sync between Mac and iPhone 
 Bib/
   BibApp.swift             Shared app entry point
   Models/                  Paper, folder, and local library persistence
-  Services/                arXiv link parsing, metadata retrieval, and PDF download
+  Services/                arXiv and DOI metadata retrieval and PDF downloads
   Views/                   Library, reader, and metadata editor
   Resources/Welcome.pdf    Bundled sample
 Bib.xcodeproj/             Shared Mac / iPhone / iPad target
@@ -87,6 +95,8 @@ These local Mac development builds are not App Sandbox builds. iOS stores the sa
 Tests use temporary libraries and generated PDFs. They cover metadata extraction, reopening saved data, atomic folder moves, deleting folders without deleting papers, original-file preservation, failed-save rollback, corrupt-library protection, and invalid/password-protected PDF imports. Drag-and-drop tests exercise native item-provider encoding and reject malformed payloads, unrelated text, and papers or folders deleted during a drag. Highlight tests verify saved colors, multiline and multipage selections, recoloring and removal after reopening, preserved text and imported annotations, write-failure rollback, and protection against overwriting another window’s changes. An expected CoreGraphics diagnostic may appear for the deliberately invalid PDF fixture.
 
 arXiv tests use simulated responses, so the suite needs no network. They cover link parsing, version matching, metadata fallback, invalid downloads, cancellation, temporary-file cleanup, request pacing, and saving downloaded metadata and PDFs into a chosen folder. A real arXiv download and saved-library reopen were also verified during implementation.
+
+DOI tests also use simulated responses and cover Crossref and CSL metadata, publisher PDF links, rejection of unrelated recommended-paper links, access-denied and network fallback, invalid PDFs, cancellation, and cleanup. Store tests cover metadata-only records, compatibility with existing libraries, and attaching PDFs without replacing current paper details. A real open-access DOI download, saved-library reopen, and the native transition from a metadata-only record to the PDF reader were verified. Subscription and institutional sign-in flows have not been tested with a live account.
 
 ## App artwork
 
