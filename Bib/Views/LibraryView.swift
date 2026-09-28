@@ -23,6 +23,9 @@ struct LibraryView: View {
     @State private var search = ""
     @State private var sort: PaperSort = .newest
     @State private var importing = false
+    @State private var importingArxiv = false
+    @State private var importNotice: String?
+    @State private var pendingImportedPaperID: UUID?
     @State private var editingFolder = false
     @State private var folderToRename: PaperFolder?
     @State private var folderName = ""
@@ -109,6 +112,26 @@ struct LibraryView: View {
             }
         }
         .sheet(isPresented: $editingFolder) { folderEditor }
+        .sheet(isPresented: $importingArxiv) {
+            ArxivImportView(store: store, initialFolderID: currentScope.folderID) { id, folderID, warning in
+                showImportedPaper(id, in: folderID)
+                importNotice = warning == nil ? nil : "The PDF was imported, but arXiv’s paper details weren’t available. You can edit them using Paper details."
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let importNotice {
+                HStack(spacing: 12) {
+                    Image(systemName: "info.circle")
+                    Text(importNotice).font(.caption)
+                    Spacer(minLength: 0)
+                    Button { self.importNotice = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Dismiss import notice")
+                }
+                .padding(12)
+                .background(.regularMaterial)
+            }
+        }
         .alert("Couldn’t complete that", isPresented: Binding(
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
@@ -132,8 +155,10 @@ struct LibraryView: View {
             Text("The papers in this folder will stay in your library as unfiled papers.")
         }
         .onChange(of: scope) { _, _ in
-            selectedPaperID = nil
+            selectedPaperID = pendingImportedPaperID
+            pendingImportedPaperID = nil
             search = ""
+            if selectedPaperID != nil { preferredColumn = .detail }
         }
         .onChange(of: store.papers) { _, _ in
             if let id = selectedPaperID, !scopedPapers.contains(where: { $0.id == id }) { selectedPaperID = nil }
@@ -257,6 +282,8 @@ struct LibraryView: View {
                         VStack(spacing: 12) {
                             Button("Import papers…", systemImage: "plus") { importing = true }
                                 .buttonStyle(.borderedProminent)
+                            Button("Import from arXiv…", systemImage: "link") { importingArxiv = true }
+                                .buttonStyle(.borderless)
                             if store.papers.isEmpty {
                                 Button("Try a sample paper", action: importWelcome)
                                     .buttonStyle(.borderless)
@@ -296,9 +323,15 @@ struct LibraryView: View {
         .searchable(text: $search, prompt: "Search papers")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(action: { importing = true }) { Label("Import papers", systemImage: "plus") }
-                    .keyboardShortcut("i", modifiers: .command)
-                    .help("Import PDF papers (⌘I)")
+                Menu {
+                    Button("Import PDFs…", systemImage: "doc.badge.plus") { importing = true }
+                        .keyboardShortcut("i", modifiers: .command)
+                    Button("Import from arXiv…", systemImage: "link") { importingArxiv = true }
+                        .keyboardShortcut("i", modifiers: [.command, .shift])
+                } label: {
+                    Label("Add papers", systemImage: "plus")
+                }
+                .help("Import PDFs or add an arXiv link")
             }
         }
     }
@@ -364,6 +397,18 @@ struct LibraryView: View {
             return
         }
         if let id = store.importPDFs(from: [url], into: currentScope.folderID).first {
+            selectedPaperID = id
+            preferredColumn = .detail
+        }
+    }
+
+    private func showImportedPaper(_ id: UUID, in folderID: UUID?) {
+        let destination = folderID.map(LibraryScope.folder) ?? .all
+        search = ""
+        if scope != destination {
+            pendingImportedPaperID = id
+            scope = destination
+        } else {
             selectedPaperID = id
             preferredColumn = .detail
         }

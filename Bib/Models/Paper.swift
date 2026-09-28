@@ -1,5 +1,14 @@
 import Foundation
 
+/// Metadata retrieved alongside a PDF; blank values leave embedded PDF metadata intact.
+struct PaperMetadata: Equatable, Sendable {
+    var title: String = ""
+    var authors: String = ""
+    var year: String = ""
+    var venue: String = ""
+    var doi: String = ""
+}
+
 struct Paper: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String

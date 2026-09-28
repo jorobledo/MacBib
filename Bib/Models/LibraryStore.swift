@@ -54,6 +54,16 @@ final class LibraryStore: ObservableObject {
     /// Each file is imported independently; one bad PDF does not discard successful imports.
     @discardableResult
     func importPDFs(from urls: [URL], into folderID: UUID? = nil) -> [UUID] {
+        importPDFs(from: urls, metadata: nil, into: folderID)
+    }
+
+    /// Copy a completed download and save its metadata together, before publishing it.
+    @discardableResult
+    func importDownloadedPDF(from url: URL, metadata: PaperMetadata?, into folderID: UUID? = nil) -> UUID? {
+        importPDFs(from: [url], metadata: metadata, into: folderID).first
+    }
+
+    private func importPDFs(from urls: [URL], metadata: PaperMetadata?, into folderID: UUID?) -> [UUID] {
         guard canEdit() else { return [] }
         guard folderExists(folderID) else {
             errorMessage = "The destination folder no longer exists. Choose another folder and try again."
@@ -79,13 +89,16 @@ final class LibraryStore: ObservableObject {
                 guard document.pageCount > 0 else { throw StoreError.emptyPDF }
 
                 let attributes = document.documentAttributes ?? [:]
-                let metadataTitle = (attributes[PDFDocumentAttribute.titleAttribute] as? String)?.trimmed ?? ""
-                let title = metadataTitle.isEmpty
-                    ? sourceURL.deletingPathExtension().lastPathComponent
-                    : metadataTitle
+                let embeddedTitle = (attributes[PDFDocumentAttribute.titleAttribute] as? String)?.nonemptyTrimmed
+                let embeddedAuthors = (attributes[PDFDocumentAttribute.authorAttribute] as? String)?.trimmed ?? ""
                 let paper = Paper(
-                    title: title,
-                    authors: (attributes[PDFDocumentAttribute.authorAttribute] as? String)?.trimmed ?? "",
+                    title: metadata?.title.nonemptyTrimmed
+                        ?? embeddedTitle
+                        ?? sourceURL.deletingPathExtension().lastPathComponent,
+                    authors: metadata?.authors.nonemptyTrimmed ?? embeddedAuthors,
+                    year: metadata?.year.trimmed ?? "",
+                    venue: metadata?.venue.trimmed ?? "",
+                    doi: metadata?.doi.trimmed ?? "",
                     folderID: folderID,
                     fileName: UUID().uuidString + ".pdf"
                 )
@@ -294,4 +307,9 @@ final class LibraryStore: ObservableObject {
 
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var nonemptyTrimmed: String? {
+        let value = trimmed
+        return value.isEmpty ? nil : value
+    }
 }

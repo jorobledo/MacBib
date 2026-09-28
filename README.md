@@ -1,6 +1,6 @@
 # Bib
 
-A small, native paper library for Mac and iPhone, built with SwiftUI and PDFKit. No third-party app dependencies, accounts, or servers.
+A small, native paper library for Mac and iPhone, built with SwiftUI and PDFKit. No third-party app dependencies or accounts.
 
 ## Run on this Mac
 
@@ -12,7 +12,7 @@ From this folder:
 
 This compiles the Swift sources, bundles the welcome PDF and app artwork, signs the app locally, and opens `.build/Bib.app`. It requires macOS 14 or newer and Apple’s Swift command-line tools. You can also double-click the built app in Finder. Quit a running copy before rebuilding to see your latest code changes.
 
-Click **Try a sample paper** to explore the reader, or use **+** / **⌘I** to import your own PDFs.
+Click **Try a sample paper** to explore the reader, or use **+ → Import PDFs…** / **⌘I** to import your own PDFs. **+ → Import from arXiv…** / **⌘⇧I** lets you paste an arXiv link and choose where to put the paper.
 
 The script uses the Command Line Tools when installed. To choose a different toolchain:
 
@@ -34,6 +34,7 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 ## What works
 
 - Import one or several PDFs; Bib copies them into its library.
+- Paste an arXiv link to download a manuscript into **All papers** or a chosen folder, with available title, authors, year, journal reference, and DOI.
 - Create folders, rename them, and remove folders while keeping their papers.
 - Drag a paper from **All papers** onto a sidebar folder to move it there. The destination highlights as you hover. Papers stay visible in **All papers**; drop onto **Unfiled** to remove a folder assignment. Dragging also works from other paper lists when the sidebar is visible.
 - Read PDFs, select text, scroll, zoom, and fit the page.
@@ -43,11 +44,13 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 - Remove a paper from its details panel, with confirmation.
 - Close and reopen the app with your library intact.
 
-Title and author are read from embedded PDF metadata when available. Otherwise the title comes from the filename. Other metadata is entered manually. The included PDF is a welcome guide, not a research paper.
+For local PDF imports, title and author are read from embedded PDF metadata when available; otherwise the title comes from the filename. arXiv imports retrieve available metadata online. All details can be edited manually. The included PDF is a welcome guide, not a research paper.
+
+For arXiv, paste an abstract (`arxiv.org/abs/…`), PDF (`arxiv.org/pdf/…`), or HTML paper link, or the paper’s identifier. Versioned and legacy identifiers are supported. The import defaults to the folder you are browsing; choose **All papers (no folder)** for an unfiled paper. Every imported paper also appears in **All papers**. A progress indicator and Cancel button remain available while downloading. If paper details are temporarily unavailable, the PDF can still import using its embedded metadata, with a notice. The importer uses the [official arXiv API](https://info.arxiv.org/help/api/user-manual.html) and follows its [request limits](https://info.arxiv.org/help/api/tou.html).
 
 To highlight, select text in the PDF and click a color below the page. On iPhone, touch and hold a word, adjust the selection handles, then tap a color. Reselect the same text to change its color, or select part of a highlighted line and use the eraser to remove that line’s Bib highlight. Existing annotations imported from other apps are preserved. Scanned pages need a selectable text layer; encrypted or protected PDFs need an unprotected copy before highlighting.
 
-This first version is local to each device. It does not sync between Mac and iPhone, retrieve metadata online, or generate citations. Imports and saves run synchronously, which is appropriate for a small initial library; background import can be added later for larger batches.
+The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv imports need an internet connection and download asynchronously. Local PDF copies and library saves are synchronous, which is appropriate for a small initial library; background local import can be added later for larger batches.
 
 ## Files and data
 
@@ -55,6 +58,7 @@ This first version is local to each device. It does not sync between Mac and iPh
 Bib/
   BibApp.swift             Shared app entry point
   Models/                  Paper, folder, and local library persistence
+  Services/                arXiv link parsing, metadata retrieval, and PDF download
   Views/                   Library, reader, and metadata editor
   Resources/Welcome.pdf    Bundled sample
 Bib.xcodeproj/             Shared Mac / iPhone / iPad target
@@ -81,6 +85,8 @@ These local Mac development builds are not App Sandbox builds. iOS stores the sa
 ```
 
 Tests use temporary libraries and generated PDFs. They cover metadata extraction, reopening saved data, atomic folder moves, deleting folders without deleting papers, original-file preservation, failed-save rollback, corrupt-library protection, and invalid/password-protected PDF imports. Drag-and-drop tests exercise native item-provider encoding and reject malformed payloads, unrelated text, and papers or folders deleted during a drag. Highlight tests verify saved colors, multiline and multipage selections, recoloring and removal after reopening, preserved text and imported annotations, write-failure rollback, and protection against overwriting another window’s changes. An expected CoreGraphics diagnostic may appear for the deliberately invalid PDF fixture.
+
+arXiv tests use simulated responses, so the suite needs no network. They cover link parsing, version matching, metadata fallback, invalid downloads, cancellation, temporary-file cleanup, request pacing, and saving downloaded metadata and PDFs into a chosen folder. A real arXiv download and saved-library reopen were also verified during implementation.
 
 ## App artwork
 

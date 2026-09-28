@@ -10,6 +10,14 @@ struct LibraryStoreTests {
         do {
             try testImportAndPersistence()
             print("PASS: PDF import, metadata, persistence, folder changes, and deletion")
+            try testDownloadedPDFMetadataAndPersistence()
+            print("PASS: Downloaded PDFs save fetched metadata and folder assignments together")
+            try testDownloadedPDFFallbackMetadata()
+            print("PASS: Missing and blank fetched metadata retain PDF metadata and filename fallbacks")
+            try testDownloadedPDFRejectsDeletedFolder()
+            print("PASS: Downloaded PDFs reject folders deleted while retrieval was in progress")
+            try testDownloadedPDFFailedSaveCleansUp()
+            print("PASS: Failed download imports leave no published paper or managed copy")
             try testMovePapersAndPersistence()
             print("PASS: Batch moves persist and retain paper metadata, order, and PDF files")
             try testRejectedMovesAreAtomic()
@@ -77,6 +85,123 @@ struct LibraryStoreTests {
         try expect(!FileManager.default.fileExists(atPath: managedURL.path), "Deleting a paper should remove its managed copy")
         try expect(FileManager.default.fileExists(atPath: source.path), "The source PDF must remain untouched")
         try expect(LibraryStore(directory: directory).papers.count == 1, "Paper deletion should persist")
+    }
+
+    private static func testDownloadedPDFMetadataAndPersistence() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("downloaded.pdf")
+        try makePDF(at: source, title: "Embedded title", author: "Embedded author")
+        let sourceBytes = try Data(contentsOf: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        let metadata = PaperMetadata(
+            title: "  A fetched paper\n",
+            authors: "  Ada Example; Grace Example  ",
+            year: " 2026 ",
+            venue: " Example Journal\n",
+            doi: " 10.0000/fetched "
+        )
+
+        let id = try unwrap(store.importDownloadedPDF(from: source, metadata: metadata, into: folderID),
+                            "Could not import downloaded PDF: \(store.errorMessage ?? "")")
+        let paper = try unwrap(store.papers.first(where: { $0.id == id }), "Downloaded paper is missing")
+        try expect(paper.title == "A fetched paper" && paper.authors == "Ada Example; Grace Example"
+                   && paper.year == "2026" && paper.venue == "Example Journal" && paper.doi == "10.0000/fetched",
+                   "Nonempty fetched metadata should override PDF metadata and be trimmed")
+        try expect(paper.folderID == folderID, "The downloaded paper should be assigned to the chosen folder")
+        let managedURL = store.fileURL(for: paper)
+        let managedBytes = try Data(contentsOf: managedURL)
+        let sourceAfterImport = try Data(contentsOf: source)
+        try expect(managedURL != source && managedBytes == sourceBytes && sourceAfterImport == sourceBytes,
+                   "Download import should copy the PDF without changing the original download")
+        let reopened = LibraryStore(directory: directory)
+        try expect(reopened.errorMessage == nil && reopened.papers == [paper] && reopened.folders == store.folders,
+                   "Fetched metadata and its folder must survive reopening the library")
+    }
+
+    private static func testDownloadedPDFFallbackMetadata() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let embedded = root.appendingPathComponent("downloaded.pdf")
+        let untitled = root.appendingPathComponent("Filename fallback.pdf")
+        try makePDF(at: embedded, title: " Embedded title ", author: " Embedded author ")
+        try makePDF(at: untitled)
+        let store = LibraryStore(directory: root.appendingPathComponent("Library"))
+        let blank = PaperMetadata(title: " \n ", authors: "\t ", year: " ", venue: "\n", doi: " \t ")
+
+        for metadata in [nil, blank] as [PaperMetadata?] {
+            let id = try unwrap(store.importDownloadedPDF(from: embedded, metadata: metadata),
+                                "Could not import PDF with fallback metadata")
+            let paper = try unwrap(store.papers.first(where: { $0.id == id }), "Missing fallback paper")
+            try expect(paper.title == "Embedded title" && paper.authors == "Embedded author",
+                       "Nil and blank fetched values should preserve trimmed embedded metadata")
+            try expect(paper.year.isEmpty && paper.venue.isEmpty && paper.doi.isEmpty && paper.folderID == nil,
+                       "Unavailable metadata should remain empty and the paper should be in the unfiled library")
+            let untitledID = try unwrap(store.importDownloadedPDF(from: untitled, metadata: metadata),
+                                        "Could not import PDF without embedded metadata")
+            let untitledPaper = try unwrap(store.papers.first(where: { $0.id == untitledID }), "Missing untitled paper")
+            try expect(untitledPaper.title == "Filename fallback" && untitledPaper.authors.isEmpty,
+                       "A PDF without metadata should fall back to its filename")
+        }
+
+        let partialID = try unwrap(store.importDownloadedPDF(from: embedded, metadata: PaperMetadata(year: "2025")),
+                                   "Could not import PDF with partial metadata")
+        let partialPaper = try unwrap(store.papers.first(where: { $0.id == partialID }), "Missing partial metadata paper")
+        try expect(partialPaper.title == "Embedded title" && partialPaper.authors == "Embedded author"
+                   && partialPaper.year == "2025",
+                   "Fallbacks should apply independently to each fetched metadata field")
+    }
+
+    private static func testDownloadedPDFRejectsDeletedFolder() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("downloaded.pdf")
+        try makePDF(at: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let destinationID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        // The user can delete the chosen destination before an asynchronous download finishes.
+        store.deleteFolder(id: destinationID)
+        let libraryURL = directory.appendingPathComponent("library.json")
+        let originalLibrary = try Data(contentsOf: libraryURL)
+
+        let id = store.importDownloadedPDF(from: source, metadata: PaperMetadata(title: "Fetched title"),
+                                           into: destinationID)
+        try expect(id == nil && store.errorMessage?.contains("folder no longer exists") == true,
+                   "A deleted destination must fail with an actionable error")
+        let libraryAfterImport = try Data(contentsOf: libraryURL)
+        let managedFiles = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
+        try expect(store.papers.isEmpty && store.folders.isEmpty && libraryAfterImport == originalLibrary,
+                   "A stale destination must leave all library state unchanged")
+        try expect(managedFiles.isEmpty && FileManager.default.fileExists(atPath: source.path),
+                   "A rejected destination must not copy or delete the downloaded PDF")
+    }
+
+    private static func testDownloadedPDFFailedSaveCleansUp() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("downloaded.pdf")
+        try makePDF(at: source, title: "Embedded title", author: "Embedded author")
+        let sourceBytes = try Data(contentsOf: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        let originalFolders = store.folders
+        let libraryURL = directory.appendingPathComponent("library.json")
+        try FileManager.default.removeItem(at: libraryURL)
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
+
+        let id = store.importDownloadedPDF(from: source,
+                                           metadata: PaperMetadata(title: "Fetched title", authors: "Fetched author", year: "2026"),
+                                           into: folderID)
+        try expect(id == nil && store.errorMessage != nil && store.papers.isEmpty && store.folders == originalFolders,
+                   "A failed JSON save must retain the previous in-memory library without publishing downloaded metadata")
+        let managedFiles = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Documents").path)
+        let sourceAfterImport = try Data(contentsOf: source)
+        try expect(managedFiles.isEmpty && sourceAfterImport == sourceBytes,
+                   "A failed download import must remove its managed copy and preserve the original PDF")
     }
 
     private static func testMovePapersAndPersistence() throws {
