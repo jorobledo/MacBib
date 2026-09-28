@@ -28,6 +28,14 @@ struct LibraryStoreTests {
             print("PASS: Invalid PDFs and stale or already attached references cannot alter the library")
             try testFailedMetadataAndAttachmentSave()
             print("PASS: Failed reference and attachment saves preserve state and clean up copied files")
+            try testRetrievedMetadataAndPersistence()
+            print("PASS: Retrieved metadata persists without changing PDF identity or clearing unrelated errors")
+            try testRetrievedMetadataPreservesEditsAndMoves()
+            print("PASS: Delayed metadata preserves user edits and moves while enriching untouched fields")
+            try testRetrievedMetadataFallbackAndDeletion()
+            print("PASS: Empty metadata leaves local values intact and deleted papers stay removed")
+            try testRetrievedMetadataSaveFailure()
+            print("PASS: Failed metadata enrichment preserves imported papers and PDF files")
             try testMovePapersAndPersistence()
             print("PASS: Batch moves persist and retain paper metadata, order, and PDF files")
             try testRejectedMovesAreAtomic()
@@ -420,6 +428,129 @@ struct LibraryStoreTests {
         try expect(store.papers == originalPapers && store.folders == originalFolders && managedFiles.isEmpty,
                    "A failed attachment must retain the unattached reference and remove its unused managed copy")
         try expect(sourceAfterAttachment == sourceBytes, "Attachment rollback must preserve the original download")
+    }
+
+    private static func testRetrievedMetadataAndPersistence() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source, title: "Embedded title", author: "Embedded author")
+        let sourceBytes = try Data(contentsOf: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        try expect(store.importPDFs(from: [source], into: folderID).count == 1, "Could not import PDF")
+        let original = try unwrap(store.papers.first, "Missing imported paper")
+        let metadata = PaperMetadata(title: "  Retrieved title\n", authors: "  Retrieved author ",
+                                     year: " 2026 ", venue: " Retrieved journal ", doi: " 10.1234/retrieved ")
+        store.errorMessage = "Another PDF could not be imported."
+        try expect(store.applyRetrievedMetadata(metadata, to: original), "Could not save retrieved metadata")
+        var expected = original
+        expected.title = "Retrieved title"
+        expected.authors = "Retrieved author"
+        expected.year = "2026"
+        expected.venue = "Retrieved journal"
+        expected.doi = "10.1234/retrieved"
+        try expect(store.papers == [expected] && store.errorMessage == "Another PDF could not be imported.",
+                   "Enrichment should trim metadata, retain identity, file, folder, and date, and preserve unrelated errors")
+        let managedURL = try unwrap(store.fileURL(for: expected), "Missing managed PDF URL")
+        let managedBytes = try Data(contentsOf: managedURL)
+        try expect(managedBytes == sourceBytes, "Metadata enrichment must not alter PDF bytes")
+        let reopened = LibraryStore(directory: directory)
+        try expect(reopened.errorMessage == nil && reopened.papers == [expected],
+                   "Enriched metadata should survive reopening")
+    }
+
+    private static func testRetrievedMetadataPreservesEditsAndMoves() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source, title: "Embedded title", author: "Embedded author")
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        let metadata = PaperMetadata(title: "Retrieved title", authors: "Retrieved author", year: "2026",
+                                     venue: "Retrieved journal", doi: "10.1234/retrieved")
+        let fields: [WritableKeyPath<Paper, String>] = [\.title, \.authors, \.year, \.venue, \.doi]
+        // Each edited field must independently survive while all four untouched fields are enriched.
+        for editedField in fields {
+            let id = try unwrap(store.importPDFs(from: [source]).first, "Could not import PDF")
+            let original = try unwrap(store.papers.first(where: { $0.id == id }), "Missing imported paper")
+            var edited = original
+            edited[keyPath: editedField] = "User value"
+            store.updatePaper(edited)
+            try expect(store.movePapers(ids: [id], to: folderID), "Could not move paper during retrieval")
+            var expected = original
+            expected.title = metadata.title
+            expected.authors = metadata.authors
+            expected.year = metadata.year
+            expected.venue = metadata.venue
+            expected.doi = metadata.doi
+            expected[keyPath: editedField] = "User value"
+            expected.folderID = folderID
+            try expect(store.applyRetrievedMetadata(metadata, to: original), "Could not merge delayed metadata")
+            try expect(store.papers.first(where: { $0.id == id }) == expected,
+                       "Delayed retrieval must preserve each edited field and latest folder while filling untouched fields")
+        }
+        try expect(LibraryStore(directory: directory).papers == store.papers,
+                   "Merged records with intervening edits and moves should persist")
+    }
+
+    private static func testRetrievedMetadataFallbackAndDeletion() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source, title: "Embedded title", author: "Embedded author")
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let id = try unwrap(store.importPDFs(from: [source]).first, "Could not import PDF")
+        let original = try unwrap(store.papers.first, "Missing imported paper")
+        let emptyMetadata = PaperMetadata(title: " \n", authors: "\t", year: " ", venue: "", doi: "\n")
+        let libraryURL = directory.appendingPathComponent("library.json")
+        let originalData = try Data(contentsOf: libraryURL)
+        store.errorMessage = "Keep this earlier error."
+        try expect(store.applyRetrievedMetadata(emptyMetadata, to: original)
+                   && store.papers == [original] && store.errorMessage == "Keep this earlier error.",
+                   "Blank retrieved fields must preserve local fallbacks and unrelated errors")
+        let unchangedData = try Data(contentsOf: libraryURL)
+        try expect(unchangedData == originalData, "An empty metadata result must leave saved data untouched")
+        store.deletePaper(id: id)
+        let afterDeletion = try Data(contentsOf: libraryURL)
+        try expect(!store.applyRetrievedMetadata(PaperMetadata(title: "Late result"), to: original)
+                   && store.papers.isEmpty && store.errorMessage == nil,
+                   "A result arriving after deletion must not recreate the paper or raise a new error")
+        let afterLateResult = try Data(contentsOf: libraryURL)
+        try expect(afterLateResult == afterDeletion && LibraryStore(directory: directory).papers.isEmpty,
+                   "A late result must leave the saved deletion intact")
+    }
+
+    private static func testRetrievedMetadataSaveFailure() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("paper.pdf")
+        try makePDF(at: source, title: "Embedded title", author: "Embedded author")
+        let sourceBytes = try Data(contentsOf: source)
+        let directory = root.appendingPathComponent("Library")
+        let store = LibraryStore(directory: directory)
+        let folderID = try unwrap(store.addFolder(named: "Reading"), "Could not add destination folder")
+        try expect(store.importPDFs(from: [source], into: folderID).count == 1, "Could not import PDF")
+        let original = try unwrap(store.papers.first, "Missing imported paper")
+        let originalFolders = store.folders
+        let libraryURL = directory.appendingPathComponent("library.json")
+        try FileManager.default.removeItem(at: libraryURL)
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
+        store.errorMessage = "Earlier error."
+        try expect(store.applyRetrievedMetadata(PaperMetadata(), to: original)
+                   && store.errorMessage == "Earlier error.",
+                   "A no-op enrichment should succeed without attempting a disk write")
+        try expect(!store.applyRetrievedMetadata(PaperMetadata(title: "Retrieved title"), to: original)
+                   && store.errorMessage?.contains("could not be saved") == true,
+                   "A failed enrichment save must report the normal save error")
+        try expect(store.papers == [original] && store.folders == originalFolders,
+                   "A failed enrichment save must not publish new metadata or alter folders")
+        let managedURL = try unwrap(store.fileURL(for: original), "Missing managed PDF URL")
+        let managedBytes = try Data(contentsOf: managedURL)
+        try expect(managedBytes == sourceBytes, "Failed enrichment must preserve the imported PDF")
     }
 
     private static func testMovePapersAndPersistence() throws {

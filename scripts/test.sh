@@ -63,6 +63,31 @@ mkdir -p "$BUILD_DIR/ModuleCache"
 /usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
     -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
     -module-cache-path "$BUILD_DIR/ModuleCache" \
+    "$PROJECT_DIR/Bib/Models/Paper.swift" \
+    "$PROJECT_DIR/Bib/Services/DOIImportService.swift" \
+    "$PROJECT_DIR/Bib/Services/ArxivImportService.swift" \
+    "$PROJECT_DIR/Bib/Services/PDFMetadataService.swift" \
+    "$PROJECT_DIR/Tests/PDFMetadataTests.swift" \
+    -o "$BUILD_DIR/PDFMetadataTests"
+"$BUILD_DIR/PDFMetadataTests"
+
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
+    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -module-cache-path "$BUILD_DIR/ModuleCache" \
+    "$PROJECT_DIR/Bib/Models/Paper.swift" \
+    "$PROJECT_DIR/Bib/Models/LibraryStore.swift" \
+    "$PROJECT_DIR/Bib/Models/StorageFolderMigration.swift" \
+    "$PROJECT_DIR/Bib/Models/PDFMetadataLookup.swift" \
+    "$PROJECT_DIR/Bib/Services/DOIImportService.swift" \
+    "$PROJECT_DIR/Bib/Services/ArxivImportService.swift" \
+    "$PROJECT_DIR/Bib/Services/PDFMetadataService.swift" \
+    "$PROJECT_DIR/Tests/PDFMetadataLookupTests.swift" \
+    -o "$BUILD_DIR/PDFMetadataLookupTests"
+"$BUILD_DIR/PDFMetadataLookupTests"
+
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
+    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -module-cache-path "$BUILD_DIR/ModuleCache" \
     "$PROJECT_DIR/Bib/Models/StorageFolderMigration.swift" \
     "$PROJECT_DIR/Tests/StorageFolderMigrationTests.swift" \
     -o "$BUILD_DIR/StorageFolderMigrationTests"

@@ -79,6 +79,37 @@ actor DOIImportService {
         self.importTimeLimit = max(1, importTimeLimit)
     }
 
+    /// Retrieve details for a PDF the user already has, without discovering or downloading a PDF.
+    func metadata(for reference: DOIReference) async throws -> PaperMetadata {
+        try Task.checkCancellation()
+        let record = try await metadata(for: reference, deadline: Date().addingTimeInterval(min(35, importTimeLimit)))
+        try Task.checkCancellation()
+        return record.metadata
+    }
+
+    /// Crossref relevance scores are not identity checks; callers must verify the returned titles.
+    func searchMetadata(title: String) async throws -> [PaperMetadata] {
+        try Task.checkCancellation()
+        var components = URLComponents(string: "https://api.crossref.org/works")!
+        components.queryItems = [URLQueryItem(name: "query.title", value: String(title.prefix(350))),
+                                 URLQueryItem(name: "rows", value: "5")]
+        let request = try makeRequest(components.url!, accept: "application/json",
+                                      deadline: Date().addingTimeInterval(min(25, importTimeLimit)))
+        let (data, response) = try await transport.data(for: request)
+        try Task.checkCancellation()
+        let http = try validatedResponse(response)
+        guard http.statusCode == 200 else { throw DOIImportError.metadataHTTP(http.statusCode) }
+        guard data.count <= DOIResourceLimits.metadataBytes,
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = object["message"] as? [String: Any],
+              let items = message["items"] as? [[String: Any]] else { throw DOIImportError.metadataUnavailable }
+        return items.prefix(5).compactMap { item in
+            guard let id = item["DOI"] as? String, let reference = try? DOIReference(id),
+                  let bytes = try? JSONSerialization.data(withJSONObject: ["message": item]) else { return nil }
+            return try? DOIMetadataRecord(data: bytes, reference: reference, crossref: true).metadata
+        }
+    }
+
     /// A valid metadata record survives a failed PDF download. Cancellation never imports a record.
     func importPaper(_ reference: DOIReference) async throws -> DOIImportResult {
         try Task.checkCancellation()

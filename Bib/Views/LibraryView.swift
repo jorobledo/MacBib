@@ -18,6 +18,7 @@ private enum PaperSort: String, CaseIterable {
 
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
+    @StateObject private var pdfMetadataLookup = PDFMetadataLookup()
     @State private var scope: LibraryScope? = .all
     @State private var selectedPaperID: UUID?
     @State private var search = ""
@@ -105,6 +106,7 @@ struct LibraryView: View {
             switch result {
             case .success(let urls):
                 let imported = store.importPDFs(from: urls, into: currentScope.folderID)
+                pdfMetadataLookup.enqueue(paperIDs: imported, in: store)
                 if let first = imported.first {
                     search = ""
                     selectedPaperID = first
@@ -129,6 +131,29 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $showingStorage) { StorageSettingsView(store: store) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            if pdfMetadataLookup.isSearching {
+                HStack(spacing: 12) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking up paper details online… \(pdfMetadataLookup.completedCount + 1) of \(pdfMetadataLookup.totalCount)")
+                        .font(.caption)
+                    Spacer(minLength: 0)
+                    Button("Cancel search") { pdfMetadataLookup.cancel() }
+                }
+                .padding(12)
+                .background(.regularMaterial)
+            }
+            if let notice = pdfMetadataLookup.notice {
+                HStack(spacing: 12) {
+                    Image(systemName: "info.circle")
+                    Text(notice).font(.caption)
+                    Spacer(minLength: 0)
+                    Button { pdfMetadataLookup.notice = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Dismiss metadata notice")
+                }
+                .padding(12)
+                .background(.regularMaterial)
+            }
             if let message = store.storageMessage {
                 HStack(spacing: 12) {
                     Image(systemName: "folder.badge.questionmark")
@@ -183,6 +208,7 @@ struct LibraryView: View {
         .onChange(of: store.papers) { _, _ in
             if let id = selectedPaperID, !scopedPapers.contains(where: { $0.id == id }) { selectedPaperID = nil }
         }
+        .onDisappear { pdfMetadataLookup.cancel(showNotice: false) }
     }
 
     private var sidebar: some View {

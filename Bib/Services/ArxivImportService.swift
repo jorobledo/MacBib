@@ -94,6 +94,34 @@ actor ArxivImportService {
         self.temporaryRoot = temporaryRoot
     }
 
+    /// Share pacing and serialization with arXiv imports, without downloading another PDF.
+    func metadata(for reference: ArxivReference) async throws -> PaperMetadata {
+        try await acquireDownload()
+        defer { releaseDownload() }
+        let entry = try await metadataEntry(for: reference)
+        try Task.checkCancellation()
+        return entry.metadata
+    }
+
+    private func metadataEntry(for reference: ArxivReference) async throws -> ArxivFeedParser.Entry {
+        if let lastMetadataRequest {
+            let delay = minimumRequestInterval - Date().timeIntervalSince(lastMetadataRequest)
+            if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+        }
+        try Task.checkCancellation()
+        lastMetadataRequest = Date()
+        let (data, response) = try await transport.data(for: request(reference.metadataURL))
+        try Task.checkCancellation()
+        try validateResponse(response)
+        let entry = try ArxivFeedParser.read(data)
+        let returnedReference = try ArxivReference(entry.id)
+        guard returnedReference.hasVersion, returnedReference.baseID == reference.baseID,
+              !reference.hasVersion || returnedReference.id == reference.id else {
+            throw ArxivImportError.mismatchedMetadata
+        }
+        return entry
+    }
+
     /// Serialize transfers and pace API calls to respect arXiv's API access policy.
     func download(_ reference: ArxivReference) async throws -> ArxivDownload {
         try await acquireDownload()
@@ -107,20 +135,8 @@ actor ArxivImportService {
             var metadata: PaperMetadata?
             var warning: String?
             do {
-                if let lastMetadataRequest {
-                    let delay = minimumRequestInterval - Date().timeIntervalSince(lastMetadataRequest)
-                    if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-                }
-                try Task.checkCancellation()
-                lastMetadataRequest = Date()
-                let (data, response) = try await transport.data(for: request(reference.metadataURL))
-                try validateResponse(response)
-                let entry = try ArxivFeedParser.read(data)
+                let entry = try await metadataEntry(for: reference)
                 let returnedReference = try ArxivReference(entry.id)
-                guard returnedReference.hasVersion, returnedReference.baseID == reference.baseID,
-                      !reference.hasVersion || returnedReference.id == reference.id else {
-                    throw ArxivImportError.mismatchedMetadata
-                }
                 resolvedReference = returnedReference
                 metadata = entry.metadata
             } catch {

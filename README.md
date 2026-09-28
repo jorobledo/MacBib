@@ -49,7 +49,7 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 - Remove a paper from its details panel, with confirmation.
 - Close and reopen the app with your library intact.
 
-For local PDF imports, title and author are read from embedded PDF metadata when available; otherwise the title comes from the filename. arXiv imports retrieve available metadata online. All details can be edited manually. The included PDF is a welcome guide, not a research paper.
+**Import PDFs…** saves local PDFs immediately, then looks up their paper details online in the background. Bib uses DOI or arXiv identifiers found in the PDF first, and searches Crossref by title when needed. Only confident matches update the title, authors, year, journal, and DOI; edits made while a search is running are preserved. The progress bar includes **Cancel search**, which keeps the imported PDFs. If the connection fails or no reliable match is found, the embedded title and author (or filename) remain, with a notice. Lookup sends identifiers or a title query to the metadata services; it does not upload the PDF. All details can be edited manually. The included welcome guide skips online lookup.
 
 For arXiv, paste an abstract (`arxiv.org/abs/…`), PDF (`arxiv.org/pdf/…`), or HTML paper link, or the paper’s identifier. Versioned and legacy identifiers are supported. The import defaults to the folder you are browsing; choose **All papers (no folder)** for an unfiled paper. Every imported paper also appears in **All papers**. A progress indicator and Cancel button remain available while downloading. If paper details are temporarily unavailable, the PDF can still import using its embedded metadata, with a notice. The importer uses the [official arXiv API](https://info.arxiv.org/help/api/user-manual.html) and follows its [request limits](https://info.arxiv.org/help/api/tou.html).
 
@@ -59,7 +59,7 @@ For a saved paper without a PDF, use **Open publisher & sign in**, sign in on th
 
 To highlight, select text in the PDF and click a color below the page. On iPhone, touch and hold a word, adjust the selection handles, then tap a color. Reselect the same text to change its color, or select part of a highlighted line and use the eraser to remove that line’s Bib highlight. Existing annotations imported from other apps are preserved. Scanned pages need a selectable text layer; encrypted or protected PDFs need an unprotected copy before highlighting.
 
-The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv and DOI imports need an internet connection and download asynchronously. Changing the PDF storage folder copies and verifies files in the background. Individual local PDF imports and library saves are synchronous, which is appropriate for a small initial library.
+The library stays local to each device; it does not sync between Mac and iPhone or generate citations. arXiv and DOI imports need an internet connection and download asynchronously. Online details for local PDF imports are optional and retrieved asynchronously; importing and reading local PDFs works offline. Changing the PDF storage folder copies and verifies files in the background. Individual local PDF copies and library saves are synchronous, which is appropriate for a small initial library.
 
 ## Files and data
 
@@ -67,7 +67,7 @@ The library stays local to each device; it does not sync between Mac and iPhone 
 Bib/
   BibApp.swift             Shared app entry point
   Models/                  Paper, folder, and local library persistence
-  Services/                arXiv and DOI metadata retrieval and PDF downloads
+  Services/                Online paper metadata lookup and PDF downloads
   Views/                   Library, reader, and metadata editor
   Resources/Welcome.pdf    Bundled sample
 Bib.xcodeproj/             Shared Mac / iPhone / iPad target
@@ -105,6 +105,8 @@ Tests use temporary libraries and generated PDFs. They cover metadata extraction
 arXiv tests use simulated responses, so the suite needs no network. They cover link parsing, version matching, metadata fallback, invalid downloads, cancellation, temporary-file cleanup, request pacing, and saving downloaded metadata and PDFs into a chosen folder. A real arXiv download and saved-library reopen were also verified during implementation.
 
 DOI tests also use simulated responses and cover Crossref and CSL metadata, publisher PDF links, rejection of unrelated recommended-paper links, access-denied and network fallback, invalid PDFs, cancellation, and cleanup. Store tests cover metadata-only records, compatibility with existing libraries, and attaching PDFs without replacing current paper details. A real open-access DOI download, saved-library reopen, and the native transition from a metadata-only record to the PDF reader were verified. Subscription and institutional sign-in flows have not been tested with a live account.
+
+Local PDF metadata tests use simulated responses to check identifier extraction, title matching, ambiguous-result rejection, offline fallback, and cancellation without downloading another PDF. Background lookup tests cover queued imports, reading the managed PDF copy, late results after cancellation, and preserving edits and deletions. Store tests also verify that retrieved details persist and that failed saves retain the imported PDF and previous metadata.
 
 Storage tests cover legacy migration, persisted folder choices, later imports/downloads/attachments, byte-for-byte preservation, identical-file reuse, conflicting or corrupt files, unavailable folders, metadata-only libraries, cancellation, and failed-save rollback. All test libraries and PDF folders are isolated temporary directories.
 

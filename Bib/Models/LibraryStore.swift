@@ -395,6 +395,37 @@ final class LibraryStore: ObservableObject {
         commit(papers: updatedPapers, folders: folders)
     }
 
+    /// Apply delayed lookup results only to fields that have not changed since retrieval began.
+    @discardableResult
+    func applyRetrievedMetadata(_ metadata: PaperMetadata, to original: Paper) -> Bool {
+        guard canEdit(), let index = papers.firstIndex(where: { $0.id == original.id }) else { return false }
+        let current = papers[index]
+        var updated = current
+        if current.title == original.title, let title = metadata.title.nonemptyTrimmed {
+            updated.title = title
+        }
+        if current.authors == original.authors, let authors = metadata.authors.nonemptyTrimmed {
+            updated.authors = authors
+        }
+        if current.year == original.year, let year = metadata.year.nonemptyTrimmed {
+            updated.year = year
+        }
+        if current.venue == original.venue, let venue = metadata.venue.nonemptyTrimmed {
+            updated.venue = venue
+        }
+        if current.doi == original.doi, let doi = metadata.doi.nonemptyTrimmed {
+            updated.doi = doi
+        }
+        guard updated != current else { return true }
+        var updatedPapers = papers
+        updatedPapers[index] = updated
+        let previousError = errorMessage
+        guard commit(papers: updatedPapers, folders: folders) else { return false }
+        // Background success must not dismiss an error from another import or user action.
+        errorMessage = previousError
+        return true
+    }
+
     /// Move current records together so stale drag data cannot replace newer metadata.
     @discardableResult
     func movePapers(ids: [UUID], to folderID: UUID?) -> Bool {
