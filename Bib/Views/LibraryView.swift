@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 
 private enum LibraryScope: Hashable {
     case all, unfiled, folder(UUID)
@@ -214,7 +217,7 @@ struct LibraryView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image("BibLogo")
+                sidebarLogo
                     .resizable()
                     .scaledToFit()
                     .frame(width: 38, height: 38)
@@ -290,6 +293,14 @@ struct LibraryView: View {
         .navigationTitle("Library")
         #if os(macOS)
         .toolbar(removing: .sidebarToggle)
+        #endif
+    }
+
+    private var sidebarLogo: Image {
+        #if os(macOS)
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+        #else
+        Image("BibLogo")
         #endif
     }
 
