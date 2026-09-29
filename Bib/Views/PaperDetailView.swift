@@ -10,7 +10,13 @@ struct PaperDetailView: View {
     @State private var attachingPDF = false
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadMessage: String?
-    @StateObject private var reader = PDFReaderController()
+    @StateObject private var reader: PDFReaderController
+
+    init(store: LibraryStore, paper: Paper) {
+        self.store = store
+        self.paper = paper
+        _reader = StateObject(wrappedValue: PDFReaderController(paperID: paper.id))
+    }
 
     private var existingPDFURL: URL? {
         guard let url = store.fileURL(for: paper), FileManager.default.fileExists(atPath: url.path) else { return nil }
