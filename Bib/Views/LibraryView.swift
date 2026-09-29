@@ -38,6 +38,7 @@ struct LibraryView: View {
     @State private var folderError: String?
     @State private var folderToDelete: PaperFolder?
     @State private var metadataSummaryPaper: Paper?
+    @State private var paperToDelete: Paper?
     @State private var preferredColumn = NavigationSplitViewColumn.content
 
     private var currentScope: LibraryScope { scope ?? .all }
@@ -206,6 +207,27 @@ struct LibraryView: View {
         } message: {
             Text("The papers in this folder will stay in your library as unfiled papers.")
         }
+        .confirmationDialog("Remove paper?", isPresented: Binding(
+            get: { paperToDelete != nil },
+            set: { if !$0 { paperToDelete = nil } }
+        ), titleVisibility: .visible) {
+            if let paper = paperToDelete {
+                Button("Remove “\(paper.title)”", role: .destructive) {
+                    store.deletePaper(id: paper.id)
+                    if !store.papers.contains(where: { $0.id == paper.id }) {
+                        selectedPaperID = nil
+                    }
+                    paperToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { paperToDelete = nil }
+        } message: {
+            if paperToDelete?.hasPDF == true {
+                Text("This removes the paper from the library and every folder, and deletes Bib’s stored PDF copy. Your original PDF is unchanged.")
+            } else {
+                Text("This removes the paper and its metadata from the library and every folder.")
+            }
+        }
         .onChange(of: scope) { _, _ in
             selectedPaperID = pendingImportedPaperID
             pendingImportedPaperID = nil
@@ -328,6 +350,15 @@ struct LibraryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
+                addPapersMenu
+                Button {
+                    paperToDelete = visiblePapers.first { $0.id == selectedPaperID }
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!visiblePapers.contains { $0.id == selectedPaperID })
+                .help("Remove the selected paper from the library")
                 Menu {
                     Picker("Sort by", selection: $sort) {
                         ForEach(PaperSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -403,23 +434,24 @@ struct LibraryView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .searchable(text: $search, prompt: "Search papers")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Import PDFs…", systemImage: "doc.badge.plus") { importing = true }
-                        .keyboardShortcut("i", modifiers: .command)
-                    Button("Import from arXiv…", systemImage: "link") { importingArxiv = true }
-                        .keyboardShortcut("i", modifiers: [.command, .shift])
-                    Button("Import by DOI…", systemImage: "number") { importingDOI = true }
-                        .keyboardShortcut("d", modifiers: [.command, .shift])
-                    Divider()
-                    Button("Paper storage…", systemImage: "folder") { showingStorage = true }
-                } label: {
-                    Label("Add papers", systemImage: "plus")
-                }
-                .help("Import PDFs, an arXiv link, or a DOI")
-            }
+    }
+
+    private var addPapersMenu: some View {
+        Menu {
+            Button("Import PDFs…", systemImage: "doc.badge.plus") { importing = true }
+                .keyboardShortcut("i", modifiers: .command)
+            Button("Import from arXiv…", systemImage: "link") { importingArxiv = true }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Import by DOI…", systemImage: "number") { importingDOI = true }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+            Divider()
+            Button("Paper storage…", systemImage: "folder") { showingStorage = true }
+        } label: {
+            Label("Add", systemImage: "plus")
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Import PDFs, an arXiv link, or a DOI")
     }
 
     private var folderEditor: some View {
