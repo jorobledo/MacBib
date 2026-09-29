@@ -1,22 +1,28 @@
 import SwiftUI
 
 struct PaperMetadataSummaryView: View {
+    @ObservedObject var store: LibraryStore
     let paper: Paper
     @Environment(\.dismiss) private var dismiss
+    @State private var editingMetadata = false
+
+    private var currentPaper: Paper {
+        store.papers.first(where: { $0.id == paper.id }) ?? paper
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Bibliographic metadata") {
-                    metadataRow("Title", value: paper.title)
-                    metadataRow("Authors", value: paper.authors)
-                    metadataRow("Year", value: paper.year)
-                    metadataRow("Journal / venue", value: paper.venue)
+                    metadataRow("Title", value: currentPaper.title)
+                    metadataRow("Authors", value: currentPaper.authors)
+                    metadataRow("Year", value: currentPaper.year)
+                    metadataRow("Journal / venue", value: currentPaper.venue)
                 }
 
                 Section("Identifiers and access") {
-                    metadataRow("DOI", value: paper.doi)
-                    if let url = paper.doiURL {
+                    metadataRow("DOI", value: currentPaper.doi)
+                    if let url = currentPaper.doiURL {
                         Link(destination: url) {
                             Label("Open paper online", systemImage: "safari")
                         }
@@ -28,8 +34,14 @@ struct PaperMetadataSummaryView: View {
                 }
 
                 Section("Library") {
-                    LabeledContent("PDF", value: paper.hasPDF ? "In library" : "Not downloaded")
-                    LabeledContent("Added", value: paper.addedAt.formatted(date: .abbreviated, time: .omitted))
+                    LabeledContent("PDF", value: currentPaper.hasPDF ? "In library" : "Not downloaded")
+                    LabeledContent("Added", value: currentPaper.addedAt.formatted(date: .abbreviated, time: .omitted))
+                }
+
+                Section {
+                    Button("Edit or fetch metadata…", systemImage: "arrow.down.doc") {
+                        editingMetadata = true
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -41,6 +53,9 @@ struct PaperMetadataSummaryView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $editingMetadata) {
+                MetadataEditor(store: store, paper: currentPaper)
             }
         }
         #if os(macOS)

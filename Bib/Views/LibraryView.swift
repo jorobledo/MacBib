@@ -136,7 +136,7 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $showingStorage) { StorageSettingsView(store: store) }
         .sheet(item: $metadataSummaryPaper) { paper in
-            PaperMetadataSummaryView(paper: paper)
+            PaperMetadataSummaryView(store: store, paper: paper)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if pdfMetadataLookup.isSearching {
