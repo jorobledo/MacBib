@@ -37,6 +37,7 @@ struct LibraryView: View {
     @State private var folderName = ""
     @State private var folderError: String?
     @State private var folderToDelete: PaperFolder?
+    @State private var metadataSummaryPaper: Paper?
     @State private var preferredColumn = NavigationSplitViewColumn.content
 
     private var currentScope: LibraryScope { scope ?? .all }
@@ -133,6 +134,9 @@ struct LibraryView: View {
             }
         }
         .sheet(isPresented: $showingStorage) { StorageSettingsView(store: store) }
+        .sheet(item: $metadataSummaryPaper) { paper in
+            PaperMetadataSummaryView(paper: paper)
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if pdfMetadataLookup.isSearching {
                 HStack(spacing: 12) {
@@ -376,6 +380,16 @@ struct LibraryView: View {
                                 .padding(12)
                                 .frame(maxWidth: 260, alignment: .leading)
                                 .background(BibTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .contextMenu {
+                            Button("View metadata…", systemImage: "info.circle") {
+                                metadataSummaryPaper = paper
+                            }
+                            if let url = paper.doiURL {
+                                Link(destination: url) {
+                                    Label("Open paper online", systemImage: "safari")
+                                }
+                            }
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
                     }
