@@ -30,7 +30,10 @@ private struct ReaderTab: Identifiable {
 }
 
 struct LibraryView: View {
+    private static let lastVisiblePaperKey = "library.lastVisiblePaperID"
+
     @ObservedObject var store: LibraryStore
+    private let defaults: UserDefaults
     @StateObject private var pdfMetadataLookup = PDFMetadataLookup()
     @State private var scope: LibraryScope? = .all
     @State private var selectedPaperID: UUID?
@@ -55,11 +58,21 @@ struct LibraryView: View {
     @State private var tabs: [ReaderTab]
     @State private var activeTabID: UUID
 
-    init(store: LibraryStore, initialPaperID: UUID? = nil) {
+    init(store: LibraryStore, initialPaperID: UUID? = nil, defaults: UserDefaults = .standard) {
         self.store = store
-        let tab = ReaderTab(paperID: initialPaperID)
-        _selectedPaperID = State(initialValue: initialPaperID)
-        _preferredColumn = State(initialValue: initialPaperID == nil ? .content : .detail)
+        self.defaults = defaults
+
+        let savedPaperID = defaults.string(forKey: Self.lastVisiblePaperKey).flatMap(UUID.init(uuidString:))
+        let restoredPaperID = initialPaperID ?? savedPaperID.flatMap { savedID in
+            store.papers.contains(where: { $0.id == savedID }) ? savedID : nil
+        }
+        if initialPaperID == nil, savedPaperID != nil, restoredPaperID == nil {
+            defaults.removeObject(forKey: Self.lastVisiblePaperKey)
+        }
+
+        let tab = ReaderTab(paperID: restoredPaperID)
+        _selectedPaperID = State(initialValue: restoredPaperID)
+        _preferredColumn = State(initialValue: restoredPaperID == nil ? .content : .detail)
         _tabs = State(initialValue: [tab])
         _activeTabID = State(initialValue: tab.id)
     }
@@ -335,6 +348,7 @@ struct LibraryView: View {
         }
         .onChange(of: selectedPaperID) { _, paperID in
             updateActiveTab(paperID: paperID)
+            saveLastVisiblePaper(paperID)
         }
         .onChange(of: store.papers) { _, _ in
             if let id = selectedPaperID, !scopedPapers.contains(where: { $0.id == id }) { selectedPaperID = nil }
@@ -689,6 +703,14 @@ struct LibraryView: View {
     private func updateActiveTab(paperID: UUID?) {
         guard let index = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
         tabs[index].paperID = paperID
+    }
+
+    private func saveLastVisiblePaper(_ paperID: UUID?) {
+        if let paperID {
+            defaults.set(paperID.uuidString, forKey: Self.lastVisiblePaperKey)
+        } else {
+            defaults.removeObject(forKey: Self.lastVisiblePaperKey)
+        }
     }
 }
 

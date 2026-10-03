@@ -55,6 +55,7 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 - Search metadata and sort by title, year, or when a paper was added.
 - Remove a paper from its details panel, with confirmation.
 - Close and reopen the app with your library intact.
+- Reopen the paper that was visible when Bib was last closed, at its saved page.
 
 **Import PDFs…** saves local PDFs immediately, then looks up their paper details online in the background. Bib uses DOI or arXiv identifiers found in the PDF first, and searches Crossref by title when needed. Only confident matches update the title, authors, year, journal, and DOI; edits made while a search is running are preserved. The progress bar includes **Cancel search**, which keeps the imported PDFs. If the connection fails or no reliable match is found, the embedded title and author (or filename) remain, with a notice. Lookup sends identifiers or a title query to the metadata services; it does not upload the PDF. All details can be edited manually. The included welcome guide skips online lookup.
 
