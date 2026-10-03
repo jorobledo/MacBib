@@ -10,6 +10,8 @@ struct PaperDetailView: View {
     @State private var attachingPDF = false
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadMessage: String?
+    @State private var showingPDFSearch = false
+    @FocusState private var pdfSearchIsFocused: Bool
     @StateObject private var reader: PDFReaderController
 
     init(store: LibraryStore, paper: Paper) {
@@ -51,6 +53,10 @@ struct PaperDetailView: View {
             Divider()
 
             if let url = existingPDFURL {
+                if showingPDFSearch {
+                    pdfSearchBar
+                    Divider()
+                }
                 PDFReader(url: url, controller: reader)
                     .id(url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -69,6 +75,12 @@ struct PaperDetailView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                     Spacer()
+                    Button(action: showPDFSearch) {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .help("Find in PDF (Command-F)")
+                    .accessibilityLabel("Find in PDF")
+                    .keyboardShortcut("f", modifiers: .command)
                     Button(action: reader.zoomOut) { Image(systemName: "minus.magnifyingglass") }
                         .help("Zoom out")
                         .accessibilityLabel("Zoom out")
@@ -131,6 +143,60 @@ struct PaperDetailView: View {
             Text(reader.errorMessage ?? "Please try again.")
         }
         .onDisappear { downloadTask?.cancel() }
+    }
+
+    private var pdfSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Find in PDF", text: $reader.searchText)
+                .textFieldStyle(.roundedBorder)
+                .focused($pdfSearchIsFocused)
+                .onChange(of: reader.searchText) { _, _ in reader.search() }
+                .onSubmit {
+                    if reader.searchResultCount > 0 { reader.findNext() }
+                }
+            Text(searchResultDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(minWidth: 72, alignment: .trailing)
+            Button(action: reader.findPrevious) { Image(systemName: "chevron.up") }
+                .disabled(reader.searchResultCount == 0)
+                .help("Previous match (Shift-Command-G)")
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+            Button(action: reader.findNext) { Image(systemName: "chevron.down") }
+                .disabled(reader.searchResultCount == 0)
+                .help("Next match (Command-G)")
+                .keyboardShortcut("g", modifiers: .command)
+            Button(action: hidePDFSearch) { Image(systemName: "xmark") }
+                .help("Close find")
+                .accessibilityLabel("Close find")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(BibTheme.canvas)
+        #if os(macOS)
+        .onExitCommand(perform: hidePDFSearch)
+        #endif
+    }
+
+    private var searchResultDescription: String {
+        guard !reader.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        guard reader.searchResultCount > 0 else { return "No matches" }
+        return "\(reader.currentSearchResult) of \(reader.searchResultCount)"
+    }
+
+    private func showPDFSearch() {
+        showingPDFSearch = true
+        DispatchQueue.main.async { pdfSearchIsFocused = true }
+    }
+
+    private func hidePDFSearch() {
+        showingPDFSearch = false
+        pdfSearchIsFocused = false
+        reader.endSearch()
     }
 
     private var missingPDF: some View {

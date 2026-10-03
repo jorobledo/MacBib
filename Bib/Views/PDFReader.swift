@@ -5,6 +5,9 @@ import PDFKit
 final class PDFReaderController: ObservableObject {
     @Published var currentPage = 1
     @Published var pageCount = 0
+    @Published var searchText = ""
+    @Published private(set) var searchResultCount = 0
+    @Published private(set) var currentSearchResult = 0
     @Published private(set) var canHighlight = false
     @Published private(set) var canRemoveHighlights = false
     @Published private(set) var allowsHighlighting = false
@@ -16,6 +19,7 @@ final class PDFReaderController: ObservableObject {
     private let defaults: UserDefaults
     private var isTrackingReadingPosition = false
     private var lastSavedPageIndex: Int?
+    private var searchResults: [PDFSelection] = []
 
     init(paperID: UUID, defaults: UserDefaults = .standard) {
         readingPositionKey = "reader.lastPage.\(paperID.uuidString)"
@@ -26,7 +30,61 @@ final class PDFReaderController: ObservableObject {
     func zoomOut() { view?.zoomOut(nil) }
     func zoomToFit() { view?.autoScales = true }
 
+    func search() {
+        guard let view, let document = view.document else {
+            clearSearchResults()
+            return
+        }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            clearSearchResults()
+            return
+        }
+
+        view.clearSelection()
+        searchResults = document.findString(query, withOptions: [.caseInsensitive, .diacriticInsensitive])
+        searchResultCount = searchResults.count
+        currentSearchResult = searchResults.isEmpty ? 0 : 1
+        view.highlightedSelections = searchResults
+        showCurrentSearchResult()
+    }
+
+    func findNext() {
+        guard !searchResults.isEmpty else { return }
+        currentSearchResult = currentSearchResult % searchResults.count + 1
+        showCurrentSearchResult()
+    }
+
+    func findPrevious() {
+        guard !searchResults.isEmpty else { return }
+        currentSearchResult = (currentSearchResult + searchResults.count - 2) % searchResults.count + 1
+        showCurrentSearchResult()
+    }
+
+    func endSearch() {
+        searchText = ""
+        clearSearchResults()
+        view?.clearSelection()
+        updateSelection()
+    }
+
+    private func showCurrentSearchResult() {
+        guard currentSearchResult > 0, currentSearchResult <= searchResults.count, let view else { return }
+        let selection = searchResults[currentSearchResult - 1]
+        view.setCurrentSelection(selection, animate: true)
+        view.go(to: selection)
+    }
+
+    private func clearSearchResults() {
+        searchResults = []
+        searchResultCount = 0
+        currentSearchResult = 0
+        view?.highlightedSelections = nil
+        view?.clearSelection()
+    }
+
     func openDocument(_ document: PDFDocument?, at url: URL) {
+        clearSearchResults()
         selection = nil
         errorMessage = nil
         highlightEditor = document.map { PDFHighlightEditor(document: $0, url: url) }
