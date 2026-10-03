@@ -19,6 +19,16 @@ private enum PaperSort: String, CaseIterable {
     case year = "Year"
 }
 
+private struct ReaderTab: Identifiable {
+    let id: UUID
+    var paperID: UUID?
+
+    init(id: UUID = UUID(), paperID: UUID? = nil) {
+        self.id = id
+        self.paperID = paperID
+    }
+}
+
 struct LibraryView: View {
     @ObservedObject var store: LibraryStore
     @StateObject private var pdfMetadataLookup = PDFMetadataLookup()
@@ -42,6 +52,17 @@ struct LibraryView: View {
     @State private var preferredColumn = NavigationSplitViewColumn.content
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var readerFocus = false
+    @State private var tabs: [ReaderTab]
+    @State private var activeTabID: UUID
+
+    init(store: LibraryStore, initialPaperID: UUID? = nil) {
+        self.store = store
+        let tab = ReaderTab(paperID: initialPaperID)
+        _selectedPaperID = State(initialValue: initialPaperID)
+        _preferredColumn = State(initialValue: initialPaperID == nil ? .content : .detail)
+        _tabs = State(initialValue: [tab])
+        _activeTabID = State(initialValue: tab.id)
+    }
 
     private var currentScope: LibraryScope { scope ?? .all }
 
@@ -81,20 +102,75 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        if readerFocus,
-           let paper = store.papers.first(where: { $0.id == selectedPaperID }) {
-            PaperDetailView(
-                store: store,
-                paper: paper,
-                sidebarsHidden: true,
-                toggleSidebars: toggleReaderFocus
-            )
-            .id(paper.id)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            libraryNavigation
+        VStack(spacing: 0) {
+            #if os(macOS)
+            readerTabBar
+            Divider()
+            #endif
+            Group {
+                if readerFocus,
+                   let paper = store.papers.first(where: { $0.id == selectedPaperID }) {
+                    PaperDetailView(
+                        store: store,
+                        paper: paper,
+                        sidebarsHidden: true,
+                        toggleSidebars: toggleReaderFocus
+                    )
+                    .id(paper.id)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    libraryNavigation
+                }
+            }
         }
     }
+
+    #if os(macOS)
+    private var readerTabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(tabs) { tab in
+                    HStack(spacing: 7) {
+                        Image(systemName: "doc.text")
+                            .font(.caption)
+                        Text(tabTitle(tab))
+                            .font(.caption)
+                            .lineLimit(1)
+                            .frame(maxWidth: 220)
+                        if tabs.count > 1 {
+                            Button {
+                                closeTab(tab.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close \(tabTitle(tab)) tab")
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(
+                        tab.id == activeTabID ? BibTheme.canvas : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectTab(tab.id) }
+                    .help(tabTitle(tab))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+        .frame(height: 38)
+        .background(.bar)
+    }
+
+    private func tabTitle(_ tab: ReaderTab) -> String {
+        guard let paperID = tab.paperID else { return "Library" }
+        return store.papers.first(where: { $0.id == paperID })?.title ?? "Paper unavailable"
+    }
+#endif
 
     private var libraryNavigation: some View {
         NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredColumn) {
@@ -256,6 +332,9 @@ struct LibraryView: View {
             pendingImportedPaperID = nil
             search = ""
             if selectedPaperID != nil { preferredColumn = .detail }
+        }
+        .onChange(of: selectedPaperID) { _, paperID in
+            updateActiveTab(paperID: paperID)
         }
         .onChange(of: store.papers) { _, _ in
             if let id = selectedPaperID, !scopedPapers.contains(where: { $0.id == id }) { selectedPaperID = nil }
@@ -423,12 +502,24 @@ struct LibraryView: View {
                     }
                 }
             } else {
-                List(selection: $selectedPaperID) {
+                List {
                     ForEach(visiblePapers) { paper in
-                        NavigationLink(value: paper.id) {
-                            PaperRow(paper: paper)
-                        }
+                        PaperRow(paper: paper)
                         .contentShape(Rectangle())
+                        #if os(macOS)
+                        .simultaneousGesture(
+                            TapGesture(count: 2)
+                                .exclusively(before: TapGesture(count: 1))
+                                .onEnded { result in
+                                    switch result {
+                                    case .first: openPaperTab(paper.id)
+                                    case .second: previewPaper(paper.id)
+                                    }
+                                }
+                        )
+                        #else
+                        .onTapGesture { previewPaper(paper.id) }
+                        #endif
                         .draggable(PaperDragItem(id: paper.id)) {
                             Label(paper.title, systemImage: "doc.text")
                                 .lineLimit(2)
@@ -447,6 +538,9 @@ struct LibraryView: View {
                             }
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
+                        .listRowBackground(paper.id == selectedPaperID ? BibTheme.softAccent : Color.clear)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { previewPaper(paper.id) }
                     }
                 }
                 .listStyle(.plain)
@@ -554,6 +648,47 @@ struct LibraryView: View {
             selectedPaperID = id
             preferredColumn = .detail
         }
+    }
+
+    private func previewPaper(_ paperID: UUID) {
+        selectedPaperID = paperID
+        preferredColumn = .detail
+    }
+
+    #if os(macOS)
+    private func openPaperTab(_ paperID: UUID) {
+        if let tab = tabs.first(where: { $0.paperID == paperID }) {
+            selectTab(tab.id)
+            return
+        }
+        let tab = ReaderTab(paperID: paperID)
+        tabs.append(tab)
+        activeTabID = tab.id
+        selectedPaperID = paperID
+        preferredColumn = .detail
+    }
+
+    private func selectTab(_ tabID: UUID) {
+        guard let tab = tabs.first(where: { $0.id == tabID }) else { return }
+        activeTabID = tabID
+        selectedPaperID = tab.paperID
+        if tab.paperID != nil { preferredColumn = .detail }
+    }
+
+    private func closeTab(_ tabID: UUID) {
+        guard tabs.count > 1, let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        let wasActive = activeTabID == tabID
+        tabs.remove(at: index)
+        guard wasActive else { return }
+        let replacement = tabs[min(index, tabs.count - 1)]
+        selectTab(replacement.id)
+    }
+
+    #endif
+
+    private func updateActiveTab(paperID: UUID?) {
+        guard let index = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
+        tabs[index].paperID = paperID
     }
 }
 

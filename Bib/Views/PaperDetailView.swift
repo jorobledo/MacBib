@@ -111,7 +111,7 @@ struct PaperDetailView: View {
             }
         }
         .background(BibTheme.readerBackground)
-        .navigationTitle("Reader")
+        .navigationTitle(paper.title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
