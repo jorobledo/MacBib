@@ -40,6 +40,8 @@ struct LibraryView: View {
     @State private var metadataSummaryPaper: Paper?
     @State private var paperToDelete: Paper?
     @State private var preferredColumn = NavigationSplitViewColumn.content
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @State private var readerFocus = false
 
     private var currentScope: LibraryScope { scope ?? .all }
 
@@ -79,7 +81,23 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        NavigationSplitView(preferredCompactColumn: $preferredColumn) {
+        if readerFocus,
+           let paper = store.papers.first(where: { $0.id == selectedPaperID }) {
+            PaperDetailView(
+                store: store,
+                paper: paper,
+                sidebarsHidden: true,
+                toggleSidebars: toggleReaderFocus
+            )
+            .id(paper.id)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            libraryNavigation
+        }
+    }
+
+    private var libraryNavigation: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredColumn) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 190, ideal: 215, max: 280)
         } content: {
@@ -87,7 +105,12 @@ struct LibraryView: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 330, max: 440)
         } detail: {
             if let paper = store.papers.first(where: { $0.id == selectedPaperID }) {
-                PaperDetailView(store: store, paper: paper)
+                PaperDetailView(
+                    store: store,
+                    paper: paper,
+                    sidebarsHidden: false,
+                    toggleSidebars: toggleReaderFocus
+                )
                     .id(paper.id)
             } else {
                 QuietPlaceholder(
@@ -240,6 +263,10 @@ struct LibraryView: View {
         .onDisappear { pdfMetadataLookup.cancel(showNotice: false) }
     }
 
+    private func toggleReaderFocus() {
+        readerFocus.toggle()
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -317,9 +344,6 @@ struct LibraryView: View {
             .help("Choose where Bib stores PDFs")
         }
         .navigationTitle("Library")
-        #if os(macOS)
-        .toolbar(removing: .sidebarToggle)
-        #endif
     }
 
     private var sidebarLogo: Image {

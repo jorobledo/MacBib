@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct PaperDetailView: View {
     @ObservedObject var store: LibraryStore
     let paper: Paper
+    let sidebarsHidden: Bool
+    let toggleSidebars: (() -> Void)?
     @State private var editingMetadata = false
     @State private var showingPublisher = false
     @State private var attachingPDF = false
@@ -14,9 +16,11 @@ struct PaperDetailView: View {
     @FocusState private var pdfSearchIsFocused: Bool
     @StateObject private var reader: PDFReaderController
 
-    init(store: LibraryStore, paper: Paper) {
+    init(store: LibraryStore, paper: Paper, sidebarsHidden: Bool = false, toggleSidebars: (() -> Void)? = nil) {
         self.store = store
         self.paper = paper
+        self.sidebarsHidden = sidebarsHidden
+        self.toggleSidebars = toggleSidebars
         _reader = StateObject(wrappedValue: PDFReaderController(paperID: paper.id))
     }
 
@@ -75,6 +79,15 @@ struct PaperDetailView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                     Spacer()
+                    #if os(macOS)
+                    if let toggleSidebars {
+                        Button(action: toggleSidebars) {
+                            Image(systemName: sidebarsHidden ? "rectangle.split.3x1" : "rectangle")
+                        }
+                        .help(sidebarsHidden ? "Show library sidebars" : "Hide library sidebars")
+                        .accessibilityLabel(sidebarsHidden ? "Show library sidebars" : "Hide library sidebars")
+                    }
+                    #endif
                     Button(action: showPDFSearch) {
                         Image(systemName: "magnifyingglass")
                     }

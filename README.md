@@ -42,7 +42,7 @@ The shared interface uses three columns on Mac and adapts to a navigation stack 
 - Open the publisher inside Bib to sign in with a subscription or institution account, then open its PDF to attach it to the saved paper. You can also attach a PDF from your files.
 - Create folders, rename them, and remove folders while keeping their papers.
 - Drag a paper from **All papers** onto a sidebar folder to move it there. The destination highlights as you hover. Papers stay visible in **All papers**; drop onto **Unfiled** to remove a folder assignment. Dragging also works from other paper lists when the sidebar is visible.
-- Read PDFs, search their text with **Command-F**, select text, scroll, zoom, and fit the page.
+- Read PDFs, hide the library sidebars for a focused view, search text with **Command-F**, select text, scroll, zoom, and fit the page.
 - Highlight selected text in yellow, green, blue, or pink. Highlights save automatically in Bib’s PDF copy and remain when you reopen the paper.
 - Edit title, authors, year, journal/venue, DOI, and folder using **ⓘ** in the reader.
 - Search metadata and sort by title, year, or when a paper was added.
