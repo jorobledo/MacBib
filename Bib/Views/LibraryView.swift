@@ -29,6 +29,13 @@ private struct ReaderTab: Identifiable {
     }
 }
 
+private struct RecentPaperPreview {
+    let tabID: UUID
+    let paperID: UUID
+    let previousPaperID: UUID?
+    let changedAt: Date
+}
+
 struct LibraryView: View {
     private static let lastVisiblePaperKey = "library.lastVisiblePaperID"
 
@@ -57,6 +64,7 @@ struct LibraryView: View {
     @State private var readerFocus = false
     @State private var tabs: [ReaderTab]
     @State private var activeTabID: UUID
+    @State private var recentPaperPreview: RecentPaperPreview?
 
     init(store: LibraryStore, initialPaperID: UUID? = nil, defaults: UserDefaults = .standard) {
         self.store = store
@@ -516,23 +524,20 @@ struct LibraryView: View {
                     }
                 }
             } else {
-                List {
+                List(selection: $selectedPaperID) {
                     ForEach(visiblePapers) { paper in
-                        PaperRow(paper: paper)
+                        Button {
+                            previewPaper(paper.id)
+                        } label: {
+                            PaperRow(paper: paper)
+                        }
+                        .buttonStyle(.plain)
                         .contentShape(Rectangle())
+                        .tag(paper.id)
                         #if os(macOS)
                         .simultaneousGesture(
-                            TapGesture(count: 2)
-                                .exclusively(before: TapGesture(count: 1))
-                                .onEnded { result in
-                                    switch result {
-                                    case .first: openPaperTab(paper.id)
-                                    case .second: previewPaper(paper.id)
-                                    }
-                                }
+                            TapGesture(count: 2).onEnded { openPaperTab(paper.id) }
                         )
-                        #else
-                        .onTapGesture { previewPaper(paper.id) }
                         #endif
                         .draggable(PaperDragItem(id: paper.id)) {
                             Label(paper.title, systemImage: "doc.text")
@@ -671,9 +676,13 @@ struct LibraryView: View {
 
     #if os(macOS)
     private func openPaperTab(_ paperID: UUID) {
-        if let tab = tabs.first(where: { $0.paperID == paperID }) {
+        if let tab = tabs.first(where: { $0.id != activeTabID && $0.paperID == paperID }) {
+            restoreRecentPreview(for: paperID)
             selectTab(tab.id)
             return
+        }
+        if tabs.first(where: { $0.id == activeTabID })?.paperID == paperID {
+            guard restoreRecentPreview(for: paperID) else { return }
         }
         let tab = ReaderTab(paperID: paperID)
         tabs.append(tab)
@@ -702,7 +711,28 @@ struct LibraryView: View {
 
     private func updateActiveTab(paperID: UUID?) {
         guard let index = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
+        let previousPaperID = tabs[index].paperID
+        if let paperID, paperID != previousPaperID {
+            recentPaperPreview = RecentPaperPreview(
+                tabID: activeTabID,
+                paperID: paperID,
+                previousPaperID: previousPaperID,
+                changedAt: Date()
+            )
+        }
         tabs[index].paperID = paperID
+    }
+
+    @discardableResult
+    private func restoreRecentPreview(for paperID: UUID) -> Bool {
+        guard let preview = recentPaperPreview,
+              preview.tabID == activeTabID,
+              preview.paperID == paperID,
+              Date().timeIntervalSince(preview.changedAt) < 1.5,
+              let index = tabs.firstIndex(where: { $0.id == preview.tabID }) else { return false }
+        tabs[index].paperID = preview.previousPaperID
+        recentPaperPreview = nil
+        return true
     }
 
     private func saveLastVisiblePaper(_ paperID: UUID?) {
