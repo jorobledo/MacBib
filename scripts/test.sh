@@ -3,12 +3,9 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/.build"
-DEVELOPER_TOOLS="${BIB_DEVELOPER_DIR:-/Library/Developer/CommandLineTools}"
-if [ ! -x "$DEVELOPER_TOOLS/usr/bin/swiftc" ]; then
-    DEVELOPER_TOOLS="$(/usr/bin/xcode-select -p)"
-fi
-export DEVELOPER_DIR="$DEVELOPER_TOOLS"
-SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
+. "$PROJECT_DIR/scripts/toolchain.sh"
+bib_configure_toolchain
+SDK_PATH="$BIB_SDK_PATH"
 ARCH="$(/usr/bin/uname -m)"
 mkdir -p "$BUILD_DIR/ModuleCache"
 

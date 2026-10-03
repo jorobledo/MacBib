@@ -4,12 +4,18 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/.build"
 APP_DIR="$BUILD_DIR/Bib.app"
-DEVELOPER_TOOLS="${BIB_DEVELOPER_DIR:-/Library/Developer/CommandLineTools}"
-if [ ! -x "$DEVELOPER_TOOLS/usr/bin/swiftc" ]; then
-    DEVELOPER_TOOLS="$(/usr/bin/xcode-select -p)"
+. "$PROJECT_DIR/scripts/toolchain.sh"
+bib_configure_toolchain
+
+if [ "${1:-}" = "--check-tools" ]; then
+    exit 0
 fi
-export DEVELOPER_DIR="$DEVELOPER_TOOLS"
-SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
+
+if [ "${1:-}" != "" ] && [ "${1:-}" != "--run" ]; then
+    echo "Usage: $0 [--run|--check-tools]" >&2
+    exit 2
+fi
+
 ARCH="$(/usr/bin/uname -m)"
 
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$BUILD_DIR/ModuleCache"
@@ -18,7 +24,7 @@ while IFS= read -r -d '' file; do SOURCES+=("$file"); done < <(/usr/bin/find "$P
 
 echo "Building Bib for macOS ($ARCH)…"
 /usr/bin/xcrun swiftc -swift-version 5 -parse-as-library \
-    -sdk "$SDK_PATH" -target "$ARCH-apple-macosx14.0" \
+    -sdk "$BIB_SDK_PATH" -target "$ARCH-apple-macosx14.0" \
     -module-cache-path "$BUILD_DIR/ModuleCache" \
     -module-name Bib -g "${SOURCES[@]}" \
     -o "$APP_DIR/Contents/MacOS/Bib"

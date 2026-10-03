@@ -10,28 +10,34 @@ From this folder:
 ./scripts/build-mac.sh --run
 ```
 
-This compiles the Swift sources, bundles the welcome PDF and app artwork, signs the app locally, and opens `.build/Bib.app`. It requires macOS 14 or newer and Apple’s Swift command-line tools. You can also double-click the built app in Finder. Quit a running copy before rebuilding to see your latest code changes.
+This compiles the Swift sources, bundles the welcome PDF and app artwork, signs the app locally, and opens `.build/Bib.app`. Running Bib requires macOS 14 or newer. Building requires Swift 5.9 and the macOS 14 SDK, supplied by Xcode 15 (or its Command Line Tools) or newer. You can also double-click the built app in Finder. Quit a running copy before rebuilding to see your latest code changes.
 
 Click **Try a sample paper** to explore the reader, or use **+ → Import PDFs…** / **⌘I** to import your own PDFs. **+ → Import from arXiv…** / **⌘⇧I** lets you paste an arXiv link and choose where to put the paper.
 
 Use **+ → Import by DOI…** / **⌘⇧D** for a DOI or `https://doi.org/…` link. Choose **All papers** or a folder; Bib fetches paper details and attempts to download the PDF. If the PDF cannot be retrieved, Bib saves the details and a clickable DOI link and shows a popup explaining why.
 
-The script uses the Command Line Tools when installed. To choose a different toolchain:
+Check compatibility before building:
+
+```sh
+./scripts/build-mac.sh --check-tools
+```
+
+The scripts use the toolchain selected by `xcode-select`, falling back to a compatible Xcode or Command Line Tools installation. They reject outdated tools with update instructions instead of producing partial compiler errors. To choose a different toolchain:
 
 ```sh
 BIB_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer ./scripts/build-mac.sh --run
 ```
 
+If developer tools are missing, run `xcode-select --install`. If they are installed but outdated, update them in **System Settings → General → Software Update**, or install a current Xcode and select it with `sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer`. Apple’s tools require administrator approval and may require accepting the Xcode license, so Bib does not silently update them.
+
 ## Run in Xcode / on iPhone
 
-1. Open `Bib.xcodeproj` in Xcode 16 or newer.
+1. Open `Bib.xcodeproj` in Xcode 15 or newer.
 2. Select the **Bib** scheme.
 3. Choose **My Mac** or an installed **iPhone Simulator**, then press **⌘R**.
 4. For a physical iPhone, choose your team under **Signing & Capabilities**, use a unique bundle identifier if needed, and select the connected device. iOS 17 or newer is required.
 
 The shared interface uses three columns on Mac and adapts to a navigation stack on iPhone. The target also supports iPad.
-
-**Toolchain status on this machine:** Xcode is installed, but `xcodebuild` currently fails before loading the project with a `_XPCTypeBool` symbol error in CoreDevice/Mercury. The Mac build script works independently. Both Mac and iOS Simulator executables have compiled successfully with the standalone Swift compiler; simulator execution and physical-device signing have not been verified. Repairing the local Xcode installation is needed to use its normal Run / simulator workflow.
 
 ## What works
 
